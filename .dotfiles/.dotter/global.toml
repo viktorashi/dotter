@@ -19,8 +19,20 @@ default_target_type = "automatic"
 # (2) Same config, different real-world location on Windows vs Unix.
 # Deployed once to a canonical path; hooks/link.sh (run from the post_deploy /
 # pre_undeploy hooks below) is the ONLY place that knows about
-# ~/.config/nvim vs %LOCALAPPDATA%/nvim. global.toml stays OS-agnostic.
+# ~/.config/nvim vs $LOCALAPPDATA/nvim. global.toml stays OS-agnostic.
 "nvim" = "~/.dotfiles-deployed/nvim"
+
+# (2b) Same idea, but the real Windows path is a *redirectable special
+# folder* (%APPDATA%), not just "somewhere under home". Don't try to
+# reconstruct %APPDATA% as `~/AppData/Roaming/...` here - on a managed
+# machine with GPO Folder Redirection or OneDrive Known Folder Move,
+# %APPDATA% is NOT `~/AppData/Roaming` anymore, and Dotter's shellexpand
+# only ever resolves `~`, never arbitrary named special folders. Keep the
+# canonical target generic; hooks/link.sh resolves `$APPDATA` live, on the
+# machine, at hook-run time - so it sees whatever the real (possibly
+# redirected) value is. Also: settings.json is a *file*, so the hook uses
+# `mklink /H` (hardlink) there, not `/J` (junction, directories only).
+"vscode/settings.json" = "~/.dotfiles-deployed/vscode/settings.json"
 
 # (3) Windows-only file. IMPORTANT: target-path expansion (shellexpand::full,
 # config.rs) runs for EVERY file during config load, unconditionally, BEFORE
