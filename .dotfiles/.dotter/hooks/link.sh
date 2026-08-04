@@ -10,8 +10,20 @@
 #   .dotter/post_deploy.sh / .dotter/post_deploy.bat   -> "$0" deploy
 #   .dotter/pre_undeploy.sh / .dotter/pre_undeploy.bat -> "$0" undeploy
 #
-# Columns:  name  canonical-source (relative to dotfiles repo root)  unix-target  windows-target
+# Columns:  name  kind  canonical-source (relative to dotfiles repo root)  unix-target  windows-target
+#   kind = dir | file  - only matters on Windows: junctions (/J) need a
+#          directory, hardlinks (/H) need a file. Unix `ln -sfn` doesn't care.
 # Use "-" in a target column to skip that OS for that row entirely.
+#
+# IMPORTANT: windows-target may (and often should) use a raw env var like
+# $APPDATA/$LOCALAPPDATA instead of a literal path. Unlike global.toml's
+# `target` field (expanded once at config-parse time by Dotter's own
+# shellexpand, config.rs:186-198 - which can't safely special-case every OS
+# folder and would crash on OSes lacking that var), THIS script only runs on
+# the OS it's relevant for, and `eval echo "$var"` reads the *live* process
+# environment at hook-run time - so folder redirection (GPO / OneDrive Known
+# Folder Move) on the actual machine is respected, not baked-in from a
+# default guess.
 
 set -eu
 mode="${1:?usage: link.sh deploy|undeploy}"
@@ -21,7 +33,8 @@ mode="${1:?usage: link.sh deploy|undeploy}"
 dotfiles_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 
 table='
-nvim ~/.dotfiles-deployed/nvim ~/.config/nvim $LOCALAPPDATA/nvim
+nvim           dir  ~/.dotfiles-deployed/nvim              ~/.config/nvim               $LOCALAPPDATA/nvim
+vscode-settings file ~/.dotfiles-deployed/vscode/settings.json ~/.config/Code/User/settings.json $APPDATA/Code/User/settings.json
 '
 
 is_windows() {
@@ -29,44 +42,49 @@ is_windows() {
 }
 
 link_unix() {
-    name=$1 canonical=$2 target=$3
+    canonical=$1 target=$2
     target=$(eval echo "$target")
     case "$mode" in
         deploy)
             mkdir -p "$(dirname "$target")"
             ln -sfn "$(eval echo "$canonical")" "$target"
-            echo "linked $name -> $target"
             ;;
         undeploy)
-            [ -L "$target" ] && rm "$target" && echo "unlinked $name ($target)"
+            [ -L "$target" ] && rm "$target"
+            rmdir -p "$(dirname "$target")" 2>/dev/null || true
             ;;
     esac
 }
 
 link_windows() {
-    name=$1 canonical=$2 target=$3
-    [ "$target" = "-" ] && return 0
+    kind=$1 canonical=$2 target=$3
     target=$(cygpath -w "$(eval echo "$target")")
     src=$(cygpath -w "$(eval echo "$canonical")")
+    flag='/J'   # directory junction: no admin/dev-mode needed
+    [ "$kind" = "file" ] && flag='/H'   # hardlink: no admin/dev-mode needed, files only
     case "$mode" in
         deploy)
-            cmd //c rmdir "$target" >/dev/null 2>&1 || true
-            cmd //c mklink /J "$target" "$src" >/dev/null
-            echo "junctioned $name -> $target"
+            mkdir -p "$(dirname "$target")"
+            if [ "$kind" = "dir" ]; then cmd //c rmdir "$target" >/dev/null 2>&1 || true
+            else cmd //c del "$target" >/dev/null 2>&1 || true; fi
+            cmd //c mklink "$flag" "$target" "$src" >/dev/null
             ;;
         undeploy)
-            cmd //c rmdir "$target" >/dev/null 2>&1 && echo "removed junction $name ($target)" || true
+            if [ "$kind" = "dir" ]; then cmd //c rmdir "$target" >/dev/null 2>&1 || true
+            else cmd //c del "$target" >/dev/null 2>&1 || true; fi
             ;;
     esac
 }
 
-echo "$table" | while read -r name canonical unix_target win_target; do
+echo "$table" | while read -r name kind canonical unix_target win_target; do
     [ -z "${name:-}" ] && continue
     if is_windows; then
         [ "$win_target" = "-" ] && continue
-        link_windows "$name" "$canonical" "$win_target"
+        link_windows "$kind" "$canonical" "$win_target"
+        echo "$mode: $name ($kind) -> $win_target"
     else
         [ "$unix_target" = "-" ] && continue
-        link_unix "$name" "$canonical" "$unix_target"
+        link_unix "$canonical" "$unix_target"
+        echo "$mode: $name -> $unix_target"
     fi
 done
