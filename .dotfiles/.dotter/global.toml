@@ -1,0 +1,39 @@
+[settings]
+default_target_type = "automatic"
+
+# ── Four categories of file, four different handling strategies ──────────────
+#
+# 1. Same content, same path everywhere      -> plain target, no OS logic at all.
+# 2. Same content, different path per OS     -> canonical target + post_deploy
+#                                                hook link (see hooks/link.sh).
+# 3. Only makes sense on one OS              -> Dotter's own `if` filter.
+# 4. Outside $HOME entirely                  -> still just a `target`, Dotter
+#                                                doesn't care where it points.
+
+[dotfiles.files]
+
+# (1) Identical everywhere: zsh only runs where $HOME/~ means the same thing,
+# so there's nothing OS-specific to express.
+"zsh/zshrc" = "~/.zshrc"
+
+# (2) Same config, different real-world location on Windows vs Unix.
+# Deployed once to a canonical path; hooks/link.sh (run from the post_deploy /
+# pre_undeploy hooks below) is the ONLY place that knows about
+# ~/.config/nvim vs %LOCALAPPDATA%/nvim. global.toml stays OS-agnostic.
+"nvim" = "~/.dotfiles-deployed/nvim"
+
+# (3) Windows-only file. IMPORTANT: target-path expansion (shellexpand::full,
+# config.rs) runs for EVERY file during config load, unconditionally, BEFORE
+# the `if` filter ever gets a chance to drop OS-inapplicable entries
+# (handlebars_helpers.rs runs strictly after config::load_configuration).
+# An OS-specific env var like $USERPROFILE would hard-crash config loading on
+# any OS where it isn't set - even though `if` would've filtered the file out
+# anyway. Use `~` instead: shellexpand resolves it to the home dir on every
+# OS (including Windows), so it never fails regardless of which OS is
+# actually running. `if` is evaluated against the `dotter.windows`/
+# `dotter.unix`/`dotter.linux`/`dotter.macos` booleans (handlebars_helpers.rs).
+"windows/scoop-config.json" = { target = "~/.config/scoop/config.json", type = "symbolic", if = "dotter.windows" }
+
+# (3) Linux(/Arch)-only file, outside $HOME, needs root to write - hence
+# `owner`. Still a completely ordinary Dotter target: (4) and (3) combined.
+"arch/pacman.conf" = { target = "/etc/pacman.conf", type = "symbolic", owner = "root", if = "dotter.linux" }
