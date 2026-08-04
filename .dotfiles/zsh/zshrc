@@ -1,0 +1,2 @@
+# example .zshrc — deployed to ~/.zshrc on every platform, identical path.
+export EDITOR=nvim
