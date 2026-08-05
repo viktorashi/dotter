@@ -7062,186 +7062,979 @@ Next: Phase 0 — want me to start on the test corpus, or the debounce cherry-pi
 
 ## User
 
-yeah, mergifrraf is "optional" runtime dep but somehow being super loud that IT WOULD WOKR SUPER COOL IF YOU HAD THIS. would also work nicely. Then alter down the road we could have the maintner tell us if he's like it to be first-class.
-
-gain, same with git as runtime dep. base arch linux has no  git or nothing installed on it.
-I want bootstrapping on sytems like that to be seamless.
-
-keep plannin
+u missed some here, @docs/lost-prompts.md 
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 35.1s)
+## Assistant (Build · Claude Opus 5 · 38.4s)
 
 _Thinking:_
 
-I'm thinking through two design challenges: the "loud optional" feature in mergiraf and its UX implications, plus the bootstrapping problem on bare Arch Linux where git isn't available by default. The installer would need to detect the package manager to grab git specifically, since it's essential for cloning the repo. Though I'm realizing git might not be strictly necessary—I could download a tarball from GitHub's codeload API instead, but then I'd lose the git repository itself, which seems like it defeats the purpose.
+I'm tracking down two separate issues: first, the mergiraf dependency situation where it's available in most package managers like Arch, Homebrew, Nix, and others, but notably missing from Debian/Ubuntu, Fedora, and Scoop. I'm also noting that prebuilt static binaries are available at around 6.5-7 MB compressed across seven target platforms.
 
-Actually, git is genuinely required because the merge/rerere machinery depends on it. So the workflow needs git as a dependency, even if dotter the binary doesn't strictly require it. The solution is a minimal installer step that shells out to the OS's native package manager—pacman, apt, dnf, zypper, apk, brew, winget, or scoop—just to install git. It's a narrow, defensible scope: about fifteen lines of case logic in the installer script, not a general package manager abstraction in the Rust code. On Windows, the install path would differ since curl and PowerShell are available by default on Windows 10+, so I'd use `irm ... | iex` instead of `curl | sh`.
+On the provenance-comment approach, I'm realizing it has a fatal flaw: when apps rewrite their own config files (like VSCode with settings.json), they parse and re-serialize the data, which destroys any comments in the output. This is exactly the scenario we're trying to handle, so comments would be lost at the critical moment. There's also the problem that comment syntax varies across formats—JSON doesn't support them at all—and the risk of apps interpreting the comment text literally. A sidecar file could work around the comment destruction issue, but it still doesn't solve the generic-versus-machine-specific classification problem.
 
-Now I'm checking whether curl is actually available on base Arch—it's not in the base meta package itself, but pacman depends on libcurl, so curl should be available. I also need to verify mergiraf's packaging status across AUR, Homebrew, and other repos, since that affects how I communicate the install instructions to users. And I'm thinking about the messaging design: when a template conflict occurs and mergiraf is missing, dotter should show a loud, per-OS install command. I could also add a `dotter doctor` subcommand as a health check—similar to what chezmoi does—to report on git and mergiraf availability upfront.
+Actually, the sidecar is just a cached version of the render-diff classification map, keyed to the base render we already have in the cache. It's an optimization, not a fundamental solution—we can always recompute it. The real insight is that we don't need line ranges at all; we should do the diff at merge time, per-hunk, which directly answers whether something belongs in the generic template or the machine-specific one. And I should note that apps often reformat entire files when they rewrite them, which makes line-range tracking even less reliable.
 
-Two real problems. Let me get the facts.
+For structured formats like TOML, YAML, JSON, and INI, I should classify per-key-path instead of per-line—that's robust to reformatting and lets us compare at the AST level. For unstructured text, line ranges are the fallback but they're fragile. So the architecture should be: compute per-machine renders, build a key-to-value map for each machine, and mark a key as generic if it has the same value everywhere. This is more honest than what's in the design doc and aligns with the user's instinct about using structure where the format has it.
+
+Now I'm checking what diff tools exist for this—dyff handles YAML, but since dotter already has toml and serde dependencies, adding serde_yaml and serde_json is straightforward. I should verify the current Cargo.toml to see what's already there, then update the design doc. There's also a bootstrap issue to resolve: git is required, and while curl is usually available, I need to verify whether pacman actually depends on the curl binary or just libcurl.
+
+Both threads recovered. Let me verify the two open facts before writing.
 
 **Tool: bash**
 
 **Input:**
 ```json
 {
-  "command": "echo \"=== is curl guaranteed on bare arch? (pacman deps) ===\"\npacman -Qi pacman 2>/dev/null | rg -i 'depends' | head -3\necho \"-- is curl in base? --\"\npacman -Si base 2>/dev/null | rg -A3 'Depends' | head -8\necho\necho \"=== mergiraf packaging status ===\"\nfor p in \"https://aur.archlinux.org/rpc/v2/info?arg[]=mergiraf\" ; do curl -s \"$p\" | python3 -c \"import sys,json;d=json.load(sys.stdin);print('AUR:',[(r['Name'],r['Version']) for r in d['results']] or 'none')\" 2>/dev/null; done\ncurl -s \"https://archlinux.org/packages/search/json/?name=mergiraf\" | python3 -c \"import sys,json;d=json.load(sys.stdin);print('arch official:',[(r['repo'],r['pkgver']) for r in d['results']] or 'none')\" 2>/dev/null\ncurl -s \"https://formulae.brew.sh/api/formula/mergiraf.json\" | python3 -c \"import sys,json;d=json.load(sys.stdin);print('homebrew:',d['versions']['stable'])\" 2>/dev/null || echo \"homebrew: none\"\ncurl -s \"https://api.github.com/search/code?q=mergiraf+repo:ScoopInstaller/Main\" 2>/dev/null | python3 -c \"import sys,json;print('scoop Main:',json.load(sys.stdin).get('total_count'))\" 2>/dev/null\ncurl -s https://crates.io/api/v1/crates/mergiraf -H 'User-Agent: x' | python3 -c \"import sys,json;print('cargo:',json.load(sys.stdin)['crate']['newest_version'])\" 2>/dev/null"
+  "command": "echo \"=== is curl actually in Arch 'base'? ===\"\ncurl -s \"https://archlinux.org/packages/core/x86_64/base/json/\" | python3 -c \"\nimport sys,json;d=json.load(sys.stdin)\ndeps=d.get('depends',[])\nprint('base depends:', deps)\nprint('curl in base deps:', any('curl' in x for x in deps))\nprint('git in base deps:', any('git' in x for x in deps))\" 2>/dev/null\necho \"-- pacman's own deps (does it pull curl binary or just libcurl?) --\"\ncurl -s \"https://archlinux.org/packages/core/x86_64/pacman/json/\" | python3 -c \"\nimport sys,json;print('pacman depends:',json.load(sys.stdin).get('depends'))\" 2>/dev/null\necho\necho \"=== dotter deps: what parsers are already in? ===\"\nrg -n '^\\[dependencies\\]' -A 40 /home/istan/dotter/Cargo.toml"
 }
 ```
 
 **Output:**
 ```
-=== is curl guaranteed on bare arch? (pacman deps) ===
--- is curl in base? --
+=== is curl actually in Arch 'base'? ===
+-- pacman's own deps (does it pull curl binary or just libcurl?) --
+pacman depends: ['bash', 'coreutils', 'curl', 'gawk', 'gettext', 'glibc', 'gnupg', 'gpgme', 'grep', 'libarchive', 'libarchive.so=13-64', 'libcrypto.so=3-64', 'libcurl.so=4-64', 'libgpgme.so=45-64', 'libmakepkg-dropins', 'openssl', 'pacman-mirrorlist', 'systemd']
 
-=== mergiraf packaging status ===
-AUR: none
-arch official: [('extra', '0.18.0')]
-homebrew: 0.18.0
-scoop Main: None
-cargo: 0.18.0
+=== dotter deps: what parsers are already in? ===
+14:[dependencies]
+15-anyhow = "1.*"
+16-clap = { version = "4.4.18", features = ["derive"] }
+17-clap_complete = "4.4.10"
+18-crossterm = "0.29.0"
+19-diff = "0.1.*"
+20-handlebars = "6.*"
+21-hostname = "0.3.*"
+22-log = "0.4.*"
+23-maplit = "1.*"
+24-evalexpr = "13"
+25-serde = { version = "1.*", features = ["derive"] }
+26-shellexpand = "2.*"
+27-simplelog = "0.12.*"
+28-tokio = "1.*"
+29-toml = "1"
+30-watchexec = { version = "8", optional = true }
+31-watchexec-events = { version = "6.0.0", optional = true }
+32-watchexec-filterer-globset = { version = "8", optional = true }
+33-
+34-[features]
+35-default = ["scripting", "watch"]
+36-scripting = ["handlebars/script_helper"]
+37-watch = ["watchexec", "watchexec-events", "watchexec-filterer-globset"]
+38-
+39-[dependencies.handlebars_misc_helpers]
+40-version = "0.17.*"
+41-default-features = false
+42-features = ["string", "json"]
+43-
+44-[dev-dependencies]
+45-mockall = "0.12.1"
+46-# Enable this instead for better failure messages (on nightly only)
+47-# mockall = { version = "0.9.*", features = ["nightly"] }
+48-
+49-[target.'cfg(windows)'.dependencies]
+50-dunce = "1.*"
+51-
+52-[target.'cfg(unix)'.dependencies]
+53-libc = "0.2.180"
+54-
 
 ```
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 12.7s)
+## Assistant (Build · Claude Opus 5 · 36.1s)
 
 _Thinking:_
 
-Mergiraf has solid distribution coverage across Arch, Homebrew, and Cargo, but I need to verify its availability in Nixpkgs, Winget, and Scoop, plus check Debian and Fedora support. The pacman query came back empty, which suggests this system might not be Arch-based—let me figure out what OS we're actually running.
+So `curl` is definitely available as a hard dependency in pacman, which means the `curl | sh` installation approach will work on a bare Arch system. I've also confirmed that dotter already pulls in `toml` and `serde_json` through the handlebars_misc_helpers feature, and `diff` is there for line-level comparisons. Adding YAML parsing would expand the scope, so I'm deferring that for now and treating it as a lazy call.
+
+Actually, I'm realizing there's an even lazier approach: instead of parsing and tracking provenance myself, I could shell out to mergiraf for the heavy lifting. But wait — mergiraf is a merge tool, not a classifier. Though here's the insight: I can express the classification problem as a merge problem itself. When an edit happens on machine M's render, I apply it to get M', then for each other machine K, I run a three-way merge with base = render(M), ours = render(K), and theirs = M'. If mergiraf merges cleanly, the change is generic and should apply to K too; if there's a conflict, it's M-specific. This avoids parsing entirely and leverages the structural awareness that mergiraf already provides.
+
+The semantics check out perfectly: a conflict means that region diverged between machines, so the edit is machine-specific. If it merges cleanly, the region is identical, so the edit is generic. Then when writing back to the template, generic edits go into the shared body, and M-specific ones go into M's conditional branch.
+
+The tricky part is mapping render lines back to template lines — that's another textual diff, and Handlebars expansion means they mostly align except in the conditional blocks. For v1, I could be honest about the risk here: instead of automatically writing back to the .hbs, just classify the edit and tell the user which file to open and where. That gives 90% of the value with way less complexity, and it's basically creating a clear merge conflict for them to resolve manually.
+
+On provenance comments: they're a non-starter because apps like VSCode rewrite their config and strip comments in the process. JSON doesn't support comments anyway, and different formats handle them differently. A sidecar file would survive, but it's just redundant caching. The N-way merge is the real solution here.
+
+Now looking at the bootstrap section — curl is a hard dependency of pacman, so `curl|sh` is safe on bare Arch.
+
+For mergiraf, it's scattered across package managers (arch extra, homebrew, nix, opensuse, alpine, chocolatey, macports, gentoo, guix, openbsd) but missing from debian/ubuntu, fedora, scoop, and winget. Since the coverage is spotty, I should skip relying on package managers and just download the prebuilt static binary directly, the same way dotter does.
+
+The binary's around 7MB compared to dotter's 3-5MB. I'll add a `dotter doctor` command for diagnostics (following chezmoi's pattern) and include a loud message at conflict time with the exact per-OS install command. Now I'm updating DESIGN.md with both sections and committing the changes.
+
+Both verified. Two findings that change the design:
+
+**`curl` is a hard dependency of `pacman`** (`depends: [bash, coreutils, curl, gawk, ...]`) — so `curl | sh` is safe on bare Arch. `git` is not in `base`, so it must be installed.
+
+**Dotter already has `diff = "0.1"` and `toml` as direct deps** — which matters for the second thread.
+
+Now the provenance question, because your instinct there led somewhere better than what's in the doc:
+
+**Tool: read**
+
+**Input:**
+```json
+{
+  "filePath": "/home/istan/dotter/docs/DESIGN.md",
+  "offset": 120,
+  "limit": 50
+}
+```
+
+**Output:**
+```
+<path>/home/istan/dotter/docs/DESIGN.md</path>
+<type>file</type>
+<content>
+120: 
+121: ## The new part: branch classification
+122: 
+123: Getting a merged *output* back into a `.hbs` requires inverting the render. Handlebars is
+124: not invertible. The trick that avoids needing it:
+125: 
+126: > **Render every declared machine's variant of the template. Diff the renders against
+127: > each other.** Lines identical across all N renders are generic. Lines that differ are
+128: > machine-specific, and you know exactly which branch produced them.
+129: 
+130: That yields a line-range → branch map with **zero template introspection** — no
+131: handlebars AST, no provenance instrumentation.
+132: 
+133: An incoming live edit then classifies itself:
+134: 
+135: - entirely within generic lines → apply to the template body
+136: - entirely within one machine's exclusive lines → apply to that `{{#if}}` branch
+137: - spans both, or lands inside a `{{variable}}` substitution → **emit the artificial
+138:   conflict**, hand to mergiraf → rerere → human
+139: 
+140: ### Rejected alternative: in-band provenance comments
+141: 
+142: Annotating the rendered output with comments saying which branch each region came from
+143: is **self-defeating**. The apps in scope are exactly the ones that rewrite their own
+144: config, and any app that does deserialize → mutate → serialize with a standard library
+145: (`serde`, Go `encoding/json`, `gopkg.in/yaml`) **drops comments by construction**. The
+146: annotation is destroyed by precisely the event it exists to survive. Strict JSON has no
+147: comments at all. (VSCode is a counterexample — it edits jsonc in place and preserves
+148: comments — but it is the minority.)
+149: 
+150: ### Accepted, but insufficient: a sidecar provenance file
+151: 
+152: A sidecar recording *"this output came from template T, machine M, template hash H"*
+153: survives app rewrites and is cheap. It makes the merge base bulletproof and distinguishes
+154: *template changed* from *target changed*. Since `.dotter/cache/` already stores the render,
+155: this is roughly "add a template hash", ~5 lines. Worth doing.
+156: 
+157: It does **not** solve classification. Provenance maps *existing* output lines back to
+158: template nodes. An app that adds a **new** setting produces a line with no provenance to
+159: look up — and that is the common case. Render-diff handles it because it classifies by
+160: *position*, not by lookup.
+161: 
+162: ### Why write-back stays manual in v1
+163: 
+164: Render-diff is not exact either. It misclassifies when two branches render identical text:
+165: 
+166: ```hbs
+167: {{#if linux}}editor = vim{{else}}editor = vim{{/if}}
+168: ```
+169: 
+
+(Showing lines 120-169 of 400. Use offset=170 to continue.)
+</content>
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 9.9s)
+
+_Thinking:_
+
+I'm noticing the DESIGN.md file is longer than what I remember writing—it's at 400 lines now and already includes the section on rejected provenance comments. Let me check the git history to understand if a previous version was restored or if there's content I didn't add myself.
 
 **Tool: bash**
 
 **Input:**
 ```json
 {
-  "command": ". /etc/os-release 2>/dev/null && echo \"this machine: $PRETTY_NAME\"\necho\necho \"=== mergiraf: more package repos ===\"\ncurl -s \"https://repology.org/api/v1/project/mergiraf\" -H 'User-Agent: research' | python3 -c \"\nimport sys,json\nd=json.load(sys.stdin)\nseen={}\nfor p in d:\n    seen.setdefault(p['repo'],p.get('version'))\nfor k,v in sorted(seen.items()): print(f'  {k}: {v}')\n\" 2>/dev/null | head -30\necho\necho \"=== does mergiraf ship prebuilt binaries / install script? ===\"\ncurl -s \"https://codeberg.org/api/v1/repos/mergiraf/mergiraf/releases?limit=1\" | python3 -c \"\nimport sys,json;d=json.load(sys.stdin)\nprint('tag:',d[0]['tag_name']);print('assets:',[a['name'] for a in d[0]['assets']][:12])\" 2>/dev/null"
+  "command": "cd /home/istan/dotter && git status --short && echo \"--- log ---\" && git log --oneline -3 && echo \"--- section headers in current DESIGN.md ---\" && rg -n '^#{2,3} ' docs/DESIGN.md && echo \"--- lines ---\" && wc -l docs/DESIGN.md"
 }
 ```
 
 **Output:**
 ```
-this machine: Ubuntu 26.04 LTS
-
-=== mergiraf: more package repos ===
-  alpine_3_21: 0.6.0
-  alpine_3_22: 0.11.0
-  alpine_3_23: 0.16.3
-  alpine_3_24: 0.17.0
-  alpine_edge: 0.17.0
-  aosc: 0.18.0
-  arch: 0.18.0
-  aur: 0.5.1.r0.g720c974
-  chimera: 0.18.0
-  chocolatey: 0.18.0
-  crates_io: 0.18.0
-  gentoo: 0.16.1
-  gnuguix: 0.16.3
-  homebrew: 0.18.0
-  liguros_develop: 0.16.3
-  macports: 0.16.3
-  manjaro_stable: 0.18.0
-  manjaro_testing: 0.18.0
-  manjaro_unstable: 0.18.0
-  nix_stable_24_11: 0.3.0
-  nix_stable_25_05: 0.11.0
-  nix_stable_25_11: 0.16.1
-  nix_stable_26_05: 0.17.0
-  nix_unstable: 0.18.0
-  openbsd: 0.18.0
-  openindiana: 0.16.1
-  openpkg_current: 0.16.1.20251107
-  opensuse_tumbleweed: 0.18.0
-  parabola: 0.18.0
-  rosa_13: 0.16.3
-
-=== does mergiraf ship prebuilt binaries / install script? ===
-tag: v0.18.0
-assets: ['mergiraf_aarch64-apple-darwin.tar.gz', 'mergiraf_aarch64-unknown-linux-gnu.tar.gz', 'mergiraf_aarch64-unknown-linux-musl.tar.gz', 'mergiraf_x86_64-apple-darwin.tar.gz', 'mergiraf_x86_64-pc-windows-gnu.zip', 'mergiraf_x86_64-unknown-linux-gnu.tar.gz', 'mergiraf_x86_64-unknown-linux-musl.tar.gz']
+--- log ---
+0c4e323 more context idk
+e9d3aa2 n-a apucat sa se gandeasca la asta
+cc440c3 more context
+--- section headers in current DESIGN.md ---
+10:## The problem, stated precisely
+38:## Prior art: nobody shipped this
+64:## Architecture: what we build vs. what we delegate
+80:### mergiraf
+94:### rerere
+121:## The new part: branch classification
+140:### Rejected alternative: in-band provenance comments
+150:### Accepted, but insufficient: a sidecar provenance file
+162:### Why write-back stays manual in v1
+185:### The constraint this requires
+200:## Declared machines
+220:## Multi-target
+252:## Bootstrap
+257:### What is already available
+263:### Prebuilt binaries make this mostly trivial
+277:### The one genuine system dependency: git
+288:### Installer flow
+304:### `dotter doctor`
+320:### Explicitly out of scope
+327:## Git setup
+345:## Phases
+349:### Phase 0 — golden config test corpus
+364:### Phase 1 — multi-target
+369:### Phase 2 — `dotter merge` + `dotter setup-git`
+376:### Phase 3 — declared machines + branch classification
+382:### Phase 4 — demo repo
+388:## Upstreaming strategy
+--- lines ---
+400 docs/DESIGN.md
 
 ```
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 33.3s)
+## Assistant (Build · Claude Opus 5 · 10.2s)
 
 _Thinking:_
 
-Mergiraf's widespread packaging across major distributions and availability as prebuilt static binaries for multiple platforms means it can be installed automatically by the bootstrap script just like dotter—simply download the appropriate tarball and place it alongside dotter.
+Both sections on provenance rejection and bootstrap/doctor are already in the doc, and the working tree is clean at commit 0c4e323, so those "lost" prompts were actually addressed in a later version. Now I need to review the remaining unread sections—the write-back manual and constraint handling around lines 162-200, plus the bootstrap, doctor, and git setup sections from 252-345—to assess their quality and see if my new insight about the N-way merge trick fits in.
 
-However, looking at what's actually available: Debian/Ubuntu and Fedora aren't on the repology list, and there's no scoop package either, so relying on package managers won't work universally. The prebuilt binary download approach is the only reliable method.
+Both threads are already in the committed doc (`0c4e323`). Let me check what's actually there before adding noise:
 
-For the git dependency on a bare Arch system: curl is definitely available since it's a hard dependency of pacman itself, so `curl | sh` will work fine. Git isn't in the base package though, so it needs to be installed separately—either through `pacman -S --noconfirm git` if we have root access and the keyring is initialized, or through another approach.
+**Tool: read**
 
-The installer should include an `ensure_git` step that handles the root/sudo situation gracefully: if we're not root but sudo exists, use sudo; otherwise error out with the exact command needed. On Windows, git also isn't present by default, but winget is available on Win10 21H2+ and Win11, so `winget install Git.Git` works there.
+**Input:**
+```json
+{
+  "filePath": "/home/istan/dotter/docs/DESIGN.md",
+  "limit": 50,
+  "offset": 162
+}
+```
 
-Actually, there's an interesting question: does dotter really need git for the deploy path? Git is only needed for cloning and the merge/rerere machinery, so we could potentially split the requirements—making git required for the full workflow but optional for simpler deployments.
+**Output:**
+```
+<path>/home/istan/dotter/docs/DESIGN.md</path>
+<type>file</type>
+<content>
+162: ### Why write-back stays manual in v1
+163: 
+164: Render-diff is not exact either. It misclassifies when two branches render identical text:
+165: 
+166: ```hbs
+167: {{#if linux}}editor = vim{{else}}editor = vim{{/if}}
+168: ```
+169: 
+170: Identical across variants → classified "generic" → but there is no generic body to write
+171: into. Ambiguous.
+172: 
+173: Neither mechanism is sound enough to justify automatic write-back into a template. So v1
+174: does not attempt it:
+175: 
+176: > Merge on the **rendered output** (safe and exact: base = `.dotter/cache/`, ours = live
+177: > target, theirs = fresh render). Then *show* the classification as a **hint** — "changed
+178: > lines 12-14 are identical across all machines' renders → likely generic; line 20 differs
+179: > → likely `work-rhel`-specific" — and open the template annotated with it. The human
+180: > presses the button.
+181: 
+182: No template inversion, no invertibility risk, roughly a third of the code. Automatic
+183: write-back is **Phase 3b**, gated on the hint proving reliable in practice.
+184: 
+185: ### The constraint this requires
+186: 
+187: Rendering all variants from one machine is only possible if every branching input is
+188: data dotter already has.
+189: 
+190: > **A content template may branch only on variables whose complete set of possible
+191: > values is declared in a tracked file. It may not branch on live probing
+192: > (`env_var`, `eval "shell cmd"`, filesystem checks).**
+193: 
+194: This applies to file **contents** only. Target **paths** are a different code path and
+195: may still use env expansion — `${APPDATA:-/nonexistent}` already works today.
+196: 
+197: A content template that genuinely needs live env opts out of classification and always
+198: routes to manual conflict. Acceptable degradation.
+199: 
+200: ## Declared machines
+201: 
+202: ```toml
+203: [settings.machines]
+204: arch-laptop = { os = "linux", distro = "arch" }
+205: desktop     = { inherits = "arch-laptop" }
+206: work-rhel   = { inherits = "arch-laptop", distro = "rhel" }
+207: win-work    = { os = "windows", version = "10" }
+208: ```
+209: 
+210: Keyed by hostname. Dotter **already** falls back to `<hostname>.toml` when `local.toml`
+211: is missing (`config.rs:159-171`), so a new machine self-identifies with zero config;
 
-The cleaner approach: make the installer install git via the native package manager as a hard requirement, and fail loudly with the exact command if it can't. For mergiraf, since it ships as a static binary, the bootstrap can just install it by default (though it's chunky at ~30-60MB with grammars), with an `--no-mergiraf` flag to skip it. Then add a `dotter doctor` health check subcommand that reports git version, mergiraf presence, rerere status, and merge driver registration.
+(Showing lines 162-211 of 400. Use offset=212 to continue.)
+</content>
+```
 
-The key is to surface the pain point loudly when it matters—when `TemplateComparison::Changed` fires and mergiraf isn't available, print the exact install command for the detected OS. Before committing to auto-install, I need to verify the actual binary size and check if chezmoi's doctor precedent exists, plus scan dotter's issue tracker for any existing "doctor" discussion.
+---
+
+## Assistant (Build · Claude Opus 5 · 19.0s)
+
+_Thinking:_
+
+The real improvement here is recognizing that I can use N-1 three-way merges for classification instead of line-range diffing—it's simpler and leverages mergiraf's structural understanding. Before committing to this approach, I should verify it actually works by testing it empirically with git merge-file.
+
+The doc already covers both lost threads well. What's missing is something better I worked out this turn — let me prove it before adding it:
 
 **Tool: bash**
 
 **Input:**
 ```json
 {
-  "command": "curl -s \"https://codeberg.org/api/v1/repos/mergiraf/mergiraf/releases?limit=1\" | python3 -c \"\nimport sys,json;d=json.load(sys.stdin)\nfor a in d[0]['assets']: print(f\\\"  {a['name']}: {a['size']/1048576:.1f} MB\\\")\"\necho\necho \"=== dotter binary size for comparison ===\"\ngh api repos/SuperCuber/dotter/releases/latest --jq '.assets[]|\"  \\(.name): \\(.size/1048576|floor) MB\"'\necho\necho \"=== precedent: chezmoi doctor ===\"\ncurl -s https://www.chezmoi.io/reference/commands/doctor/ | rg -o 'Check for potential problems[^<]*' | head -2\necho\necho \"=== dotter issues mentioning doctor/health/check ===\"\ngh search issues --repo SuperCuber/dotter \"doctor OR health\" --json number,title,state --limit 5 2>/dev/null | python3 -c \"import sys,json;[print(f\\\"  #{i['number']} [{i['state']}] {i['title']}\\\") for i in json.load(sys.stdin)]\" 2>/dev/null || echo \"  none\""
+  "command": "cd /tmp/opencode && rm -rf clf && mkdir clf && cd clf\nprintf 'theme = dark\\nshell = zsh\\npkg = pacman\\n'  > render_arch\nprintf 'theme = dark\\nshell = zsh\\npkg = dnf\\n'     > render_rhel\n\necho \"### CASE 1: app on arch edits a GENERIC line (theme)\"\nprintf 'theme = light\\nshell = zsh\\npkg = pacman\\n' > live_arch\ncp render_rhel ours1\ngit merge-file --diff3 -p ours1 render_arch live_arch > out1 2>/dev/null; echo \"exit=$?  (0 = clean)\"\ncat out1\necho\necho \"### CASE 2: app on arch edits a MACHINE-SPECIFIC line (pkg)\"\nprintf 'theme = dark\\nshell = zsh\\npkg = yay\\n' > live_arch2\ncp render_rhel ours2\ngit merge-file --diff3 -p ours2 render_arch live_arch2 > out2 2>/dev/null; echo \"exit=$?  (>0 = conflict)\"\ncat out2"
 }
 ```
 
 **Output:**
 ```
-  mergiraf_aarch64-apple-darwin.tar.gz: 7.1 MB
-  mergiraf_aarch64-unknown-linux-gnu.tar.gz: 6.5 MB
-  mergiraf_aarch64-unknown-linux-musl.tar.gz: 6.5 MB
-  mergiraf_x86_64-apple-darwin.tar.gz: 6.8 MB
-  mergiraf_x86_64-pc-windows-gnu.zip: 6.4 MB
-  mergiraf_x86_64-unknown-linux-gnu.tar.gz: 6.7 MB
-  mergiraf_x86_64-unknown-linux-musl.tar.gz: 6.7 MB
+### CASE 1: app on arch edits a GENERIC line (theme)
+exit=0  (0 = clean)
+theme = light
+shell = zsh
+pkg = dnf
 
-=== dotter binary size for comparison ===
-  completions.zip: 0 MB
-  dotter-linux-arm64-musl: 3 MB
-  dotter-linux-x64-musl: 5 MB
-  dotter-macos-arm64.arm: 3 MB
-  dotter-windows-x64-msvc.exe: 3 MB
-
-=== precedent: chezmoi doctor ===
-Check for potential problems.
-
-=== dotter issues mentioning doctor/health/check ===
+### CASE 2: app on arch edits a MACHINE-SPECIFIC line (pkg)
+exit=1  (>0 = conflict)
+theme = dark
+shell = zsh
+<<<<<<< ours2
+pkg = dnf
+||||||| render_arch
+pkg = pacman
+=======
+pkg = yay
+>>>>>>> live_arch2
 
 ```
 
 ---
 
-## User
+## Assistant (Build · Claude Opus 5 · 16.8s)
 
-also regarding 
+_Thinking:_
 
-> when an app rewrites its own config in place, that edit finds its
-way back into the right template branch instead of being lost or silently clobbered.
+The 3-way merge is working as expected without requiring new code. Now I'm testing a new line addition scenario where the provenance lookup fails—specifically when the app adds a `font = mono` setting on the architecture, with base as render_arch, ours as render_rhel, and theirs as live. This should merge cleanly to generic. I want to verify this case along with the reformat robustness that motivated mergiraf in the first place.
 
+**Tool: bash**
 
-would it jusit be easier to somehow comment in that "this file comes from the branch with variabbles {{ }} blabla for config file formats that suppotr commenting, then fallback to this clever tactic for the ones that don't? because we might have the risk of applications interpreting them literally.
-or maybe some other way, like leaving a file besides the gneerated output that tells us exacltly where it comes from? idkk tbh.
+**Input:**
+```json
+{
+  "command": "cd /tmp/opencode/clf\necho \"### CASE 3: app ADDS a new setting (the case provenance-lookup cannot handle)\"\nprintf 'theme = dark\\nshell = zsh\\nfont = mono\\npkg = pacman\\n' > live3\ncp render_rhel ours3\ngit merge-file --diff3 -p ours3 render_arch live3 >out3 2>/dev/null; echo \"exit=$? (0=clean=generic)\"; cat out3\necho\necho \"### CASE 4: app REFORMATS whole file (reorders keys) — line-based limit\"\nprintf 'pkg = pacman\\nshell = zsh\\ntheme = light\\n' > live4\ncp render_rhel ours4\ngit merge-file --diff3 -p ours4 render_arch live4 >out4 2>/dev/null; echo \"exit=$? (expect spurious conflict)\"\necho \"mergiraf installed? $(command -v mergiraf || echo NO)\""
+}
+```
 
-Oh but that doesnt solve the problem of "shuold this go in generic template, or OS / machine specific?" which we would cleverly solve like this no?
+**Output:**
+```
+### CASE 3: app ADDS a new setting (the case provenance-lookup cannot handle)
+exit=1 (0=clean=generic)
+theme = dark
+shell = zsh
+<<<<<<< ours3
+pkg = dnf
+||||||| render_arch
+pkg = pacman
+=======
+font = mono
+pkg = pacman
+>>>>>>> live3
 
-when an app rewrites its own config in place, that edit finds its
-way back into the right template branch instead of being lost or silently clobbered.
+### CASE 4: app REFORMATS whole file (reorders keys) — line-based limit
+exit=1 (expect spurious conflict)
+mergiraf installed? NO
 
-
-you said something about this in your design.md but i reverted your context due to technical issues. See what you missed
+```
 
 ---
 
-## Assistant (Build · Claude Opus 5)
+## Assistant (Build · Claude Opus 5 · 15.2s)
+
+_Thinking:_
+
+Case 3 is a false conflict—adding a generic `font = mono` line next to a machine-specific entry triggers a merge conflict even though they're independent changes. This is exactly where structural merging with mergiraf would help, since it would recognize `font` as a separate key insertion rather than treating it as a line-based adjacency problem. I should test this claim by actually installing and trying mergiraf to see if it resolves cleanly.
+
+Rather than building from source, I'll grab the prebuilt binary from codeberg—it's only 6.7MB and much faster than compiling all those tree-sitter grammars. This is worth verifying empirically since the whole argument depends on it working.
+
+Case 3 gives a **false conflict** — line-based merge can't see that `font = mono` is an independent insertion. That's the whole argument for mergiraf. Let me actually verify it fixes this rather than assume:
+
+**Tool: bash**
+
+**Input:**
+```json
+{
+  "command": "cd /tmp/opencode && curl -sL -o mg.tar.gz \"https://codeberg.org/mergiraf/mergiraf/releases/download/v0.18.0/mergiraf_x86_64-unknown-linux-gnu.tar.gz\" && tar xzf mg.tar.gz && ls -la mergiraf 2>/dev/null && ./mergiraf --version"
+}
+```
+
+**Output:**
+```
+-rwxr-xr-x 1 istan istan 74480512 Jul 14 20:57 mergiraf
+mergiraf 0.18.0
+
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 6.9s)
+
+**Tool: bash**
+
+**Input:**
+```json
+{
+  "command": "cd /tmp/opencode/clf && MG=/tmp/opencode/mergiraf\nfor f in render_arch render_rhel live3 live4; do cp $f $f.toml; done\necho \"### CASE 3 via mergiraf (generic ADDITION next to machine-specific line)\"\n$MG merge render_arch.toml render_rhel.toml live3.toml -s render_arch.toml 2>&1 | head -20\necho \"exit=$?\"\necho\necho \"### CASE 4 via mergiraf (whole-file REORDER)\"\n$MG merge render_arch.toml render_rhel.toml live4.toml 2>&1 | head -20\necho \"exit=$?\""
+}
+```
+
+**Output:**
+```
+### CASE 3 via mergiraf (generic ADDITION next to machine-specific line)
+theme = dark
+shell = zsh
+<<<<<<< render_rhel.toml
+pkg = dnf
+||||||| render_arch.toml
+pkg = pacman
+=======
+font = mono
+pkg = pacman
+>>>>>>> live3.toml
+exit=0
+
+### CASE 4 via mergiraf (whole-file REORDER)
+<<<<<<< render_rhel.toml
+theme = dark
+shell = zsh
+pkg = dnf
+||||||| render_arch.toml
+theme = dark
+shell = zsh
+pkg = pacman
+=======
+pkg = pacman
+shell = zsh
+theme = light
+>>>>>>> live4.toml
+exit=0
+
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 14.8s)
+
+_Thinking:_
+
+Wait, I need to double-check the argument order for mergiraf. The docs specify `mergiraf merge --git %O %A %B` where %O is the base/ancestor, %A is ours, and %B is theirs. So I passed `render_arch.toml render_rhel.toml live3.toml`, which maps to base=render_arch, ours=render_rhel, theirs=live3 — that should be correct. But it looks like the output got cut off mid-word.
+
+The tool still produced conflicts even though it should have resolved them. Looking at the conflict shape, it appears to have fallen back to line-based merging, which suggests either a parse error or that mergiraf's commutative merging for TOML isn't enabled for top-level key-value pairs. I should test with a section-based TOML structure instead, and also verify whether mergiraf can handle genuinely independent insertions in different regions of a file. Let me design a cleaner test case to see if the tool actually resolves what it should.
+
+mergiraf didn't resolve either. Let me test whether it resolves anything at all here — this matters a lot:
+
+**Tool: bash**
+
+**Input:**
+```json
+{
+  "command": "cd /tmp/opencode/clf && MG=/tmp/opencode/mergiraf\nprintf '[a]\\nx = 1\\n\\n[b]\\ny = 2\\n' > b.toml\nprintf '[a]\\nx = 1\\nnew_ours = 9\\n\\n[b]\\ny = 2\\n' > o.toml\nprintf '[a]\\nx = 1\\n\\n[b]\\ny = 2\\nnew_theirs = 8\\n' > t.toml\necho \"--- independent additions in DIFFERENT sections ---\"\n$MG merge b.toml o.toml t.toml; echo \"exit=$?\"\necho\necho \"--- independent additions in the SAME section ---\"\nprintf '[a]\\nx = 1\\np = 9\\n' > o2.toml\nprintf '[a]\\nx = 1\\nq = 8\\n' > t2.toml\nprintf '[a]\\nx = 1\\n' > b2.toml\n$MG merge b2.toml o2.toml t2.toml; echo \"exit=$?\"\necho\necho \"--- languages list includes toml? ---\"; $MG languages 2>/dev/null | rg -i toml"
+}
+```
+
+**Output:**
+```
+--- independent additions in DIFFERENT sections ---
+[a]
+x = 1
+new_ours = 9
+
+[b]
+y = 2
+new_theirs = 8
+exit=0
+
+--- independent additions in the SAME section ---
+[a]
+x = 1
+p = 9
+q = 8
+exit=0
+
+--- languages list includes toml? ---
+pyproject.toml (pyproject.toml)
+TOML (*.toml)
+INFO Mergiraf: Solved 1 conflict. Review with: mergiraf review b2.toml_WVAuSKOf
+
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 15.9s)
+
+_Thinking:_
+
+Mergiraf actually handles independent additions correctly, even within the same section. In case 3, the real conflict is on `pkg`: ours changed it to `dnf` while theirs kept `pacman` (same as base), but that shouldn't create a conflict since ours is the only one that modified it. I'm trying to figure out why case 3 failed when the logic suggests it should work.
+
+Let me check if the issue is related to whether these are top-level key-value pairs versus entries within a section header — my earlier test with `[a]` worked fine, but case 3 uses bare root-level pairs. I should retest case 3 with a section header added to see if that's the distinguishing factor.
+
+**Tool: bash**
+
+**Input:**
+```json
+{
+  "command": "cd /tmp/opencode/clf && MG=/tmp/opencode/mergiraf\necho \"=== case 3 WITH a section header ===\"\nprintf '[cfg]\\ntheme = dark\\nshell = zsh\\npkg = pacman\\n' > b3.toml\nprintf '[cfg]\\ntheme = dark\\nshell = zsh\\npkg = dnf\\n'    > o3.toml\nprintf '[cfg]\\ntheme = dark\\nshell = zsh\\nfont = mono\\npkg = pacman\\n' > t3.toml\n$MG merge b3.toml o3.toml t3.toml; echo \"exit=$?\"\necho\necho \"=== same, but ROOT-level (no section) ===\"\n$MG merge render_arch.toml render_rhel.toml live3.toml; echo \"exit=$?\"\necho\necho \"=== root-level, addition placed at END instead of middle ===\"\nprintf 'theme = dark\\nshell = zsh\\npkg = pacman\\nfont = mono\\n' > t5.toml\n$MG merge render_arch.toml render_rhel.toml t5.toml; echo \"exit=$?\""
+}
+```
+
+**Output:**
+```
+=== case 3 WITH a section header ===
+[cfg]
+theme = dark
+shell = zsh
+<<<<<<< o3.toml
+pkg = dnf
+||||||| b3.toml
+pkg = pacman
+=======
+font = mono
+pkg = pacman
+>>>>>>> t3.toml
+exit=1
+
+=== same, but ROOT-level (no section) ===
+theme = dark
+shell = zsh
+<<<<<<< render_rhel.toml
+pkg = dnf
+||||||| render_arch.toml
+pkg = pacman
+=======
+font = mono
+pkg = pacman
+>>>>>>> live3.toml
+exit=1
+
+=== root-level, addition placed at END instead of middle ===
+theme = dark
+shell = zsh
+<<<<<<< render_rhel.toml
+pkg = dnf
+||||||| render_arch.toml
+pkg = pacman
+=======
+pkg = pacman
+font = mono
+>>>>>>> t5.toml
+exit=1
+
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 16.8s)
+
+_Thinking:_
+
+Mergiraf is flagging conflicts even when the addition happens at the end, and I think the issue is that `pkg` differs between our version (dnf) and theirs (pacman), though theirs matches the base version so it shouldn't actually conflict. I'm wondering if mergiraf's tree matching algorithm is getting confused by the `font` insertion and treating it as a reordering problem rather than a simple addition.
+
+Let me test this systematically with git merge-file on the simplest case—just our change to `pkg` and their addition of `font` at the end—to see if a pure line-based tool handles it cleanly. If even generic additions get misclassified as conflicts, that undermines my assumption about using merge behavior to distinguish machine-specific changes from universal ones.
+
+**Tool: bash**
+
+**Input:**
+```json
+{
+  "command": "cd /tmp/opencode/clf\necho \"=== git merge-file on t5 (addition at END, far from pkg) ===\"\ncp render_rhel o5; git merge-file --diff3 -p o5 render_arch t5.toml; echo \"exit=$?\"\necho\necho \"=== control: ours changes pkg, theirs changes NOTHING ===\"\ncp render_rhel oc; git merge-file --diff3 -p oc render_arch render_arch; echo \"exit=$?\"\necho\necho \"=== bigger file so the hunks aren't adjacent ===\"\nprintf 'a=1\\nb=2\\nc=3\\nd=4\\ne=5\\npkg = pacman\\n' > B\nprintf 'a=1\\nb=2\\nc=3\\nd=4\\ne=5\\npkg = dnf\\n'    > O\nprintf 'a=1\\nb=2\\nc=3\\nd=4\\ne=5\\npkg = pacman\\nfont=mono\\n' > T\ngit merge-file --diff3 -p O B T; echo \"exit=$? (expect 0)\""
+}
+```
+
+**Output:**
+```
+=== git merge-file on t5 (addition at END, far from pkg) ===
+theme = dark
+shell = zsh
+<<<<<<< o5
+pkg = dnf
+||||||| render_arch
+pkg = pacman
+=======
+pkg = pacman
+font = mono
+>>>>>>> t5.toml
+exit=1
+
+=== control: ours changes pkg, theirs changes NOTHING ===
+theme = dark
+shell = zsh
+pkg = dnf
+exit=0
+
+=== bigger file so the hunks aren't adjacent ===
+a=1
+b=2
+c=3
+d=4
+e=5
+<<<<<<< O
+pkg = dnf
+||||||| B
+pkg = pacman
+=======
+pkg = pacman
+font=mono
+>>>>>>> T
+exit=1 (expect 0)
+
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 11.5s)
+
+_Thinking:_
+
+So the core issue is that appending a line at the end of a file right after a machine-specific line always creates a conflict because the diff hunk includes that last line. It's a classic adjacent change problem—if the machine-specific entry were positioned elsewhere with generic lines after it, there'd be no conflict. Let me test moving it to the middle to confirm this theory.
+
+**Tool: bash**
+
+**Input:**
+```json
+{
+  "command": "cd /tmp/opencode/clf\nprintf 'a=1\\npkg = pacman\\nb=2\\nc=3\\nd=4\\n' > B2\nprintf 'a=1\\npkg = dnf\\nb=2\\nc=3\\nd=4\\n'    > O2\nprintf 'a=1\\npkg = pacman\\nb=2\\nc=3\\nd=4\\nfont=mono\\n' > T2\necho \"=== machine-specific line in MIDDLE, generic addition at end ===\"\ngit merge-file --diff3 -p O2 B2 T2; echo \"exit=$? (0 = correctly classified generic)\"\necho\necho \"=== and mergiraf on the SAME adjacency case, as toml ===\"\ncp B2 B2.toml; cp O2 O2.toml; cp T.toml T3.toml 2>/dev/null\nprintf 'a=1\\nb=2\\nc=3\\nd=4\\ne=5\\npkg = pacman\\n' > b6.toml\nprintf 'a=1\\nb=2\\nc=3\\nd=4\\ne=5\\npkg = dnf\\n'    > o6.toml\nprintf 'a=1\\nb=2\\nc=3\\nd=4\\ne=5\\npkg = pacman\\nfont=mono\\n' > t6.toml\n/tmp/opencode/mergiraf merge b6.toml o6.toml t6.toml; echo \"exit=$?\""
+}
+```
+
+**Output:**
+```
+=== machine-specific line in MIDDLE, generic addition at end ===
+a=1
+pkg = dnf
+b=2
+c=3
+d=4
+font=mono
+exit=0 (0 = correctly classified generic)
+
+=== and mergiraf on the SAME adjacency case, as toml ===
+a=1
+b=2
+c=3
+d=4
+e=5
+<<<<<<< o6.toml
+pkg = dnf
+||||||| b6.toml
+pkg = pacman
+=======
+pkg = pacman
+font=mono
+>>>>>>> t6.toml
+exit=1
+
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 32.9s)
+
+_Thinking:_
+
+The classification-by-merge approach is working as intended—generic edits merge cleanly and stay generic, machine-specific edits trigger conflicts and remain machine-specific, and non-adjacent additions work fine. The problem emerges when an addition sits right next to a machine-specific line, creating a false conflict that incorrectly marks it as machine-specific.
+
+Both git and mergiraf hit this same wall. Mergiraf does handle independent additions on both sides cleanly, but it didn't solve the adjacency case for root-level TOML pairs—its commutative merging didn't engage for that structure. So my earlier claim that mergiraf fixes this was wrong, and I need to correct that in the doc.
+
+The safe thing is that false conflicts fall back to human review rather than silently misrouting content. Now I'm going to rewrite the doc section, replacing the line-range mechanism description with the merge-based framing and inserting it after the branch classification opening, then editing the relevant region to be precise about what's actually happening.
+
+Now I have the full picture, including where it breaks. Updating the doc:
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "filePath": "/home/istan/dotter/docs/DESIGN.md",
+  "oldString": "That yields a line-range → branch map with **zero template introspection** — no\nhandlebars AST, no provenance instrumentation.\n\nAn incoming live edit then classifies itself:\n\n- entirely within generic lines → apply to the template body\n- entirely within one machine's exclusive lines → apply to that `{{#if}}` branch\n- spans both, or lands inside a `{{variable}}` substitution → **emit the artificial\n  conflict**, hand to mergiraf → rerere → human",
+  "newString": "That yields a classification with **zero template introspection** — no handlebars AST, no\nprovenance instrumentation.\n\n### The classification *is* a three-way merge (verified)\n\nComparing renders line-by-line and maintaining a line-range map is more machinery than\nneeded. The question \"is this edit generic or machine-specific?\" is already answered\nexactly by a 3-way merge we can run with tools we depend on anyway.\n\nFor an edit observed on machine `M`, and for each other declared machine `K`:\n\n```\nbase   = render(M)          # what M looked like before the app touched it == .dotter/cache/\nours   = render(K)          # what K currently renders to\ntheirs = live file on M     # base + the app's edit\n```\n\n- **merges cleanly** → the edited region is identical across M and K → the edit is\n  **generic**\n- **conflicts** → K diverges from M in that region → the edit is **M-specific**\n\nThat is precisely `git merge-file` semantics: a conflict arises iff *ours* also changed\nrelative to *base* in the same region — which is the definition of \"this region is\nmachine-divergent\".\n\nNo line-range map, no new parser, no template introspection. `N-1` invocations of a\nbinary already in the design.\n\nVerified empirically (`git merge-file --diff3`):\n\n| edit on `arch` | result | classification |\n|---|---|---|\n| `theme = dark` → `light` (identical on both renders) | exit 0, clean | generic ✓ |\n| `pkg = pacman` → `yay` (differs: rhel has `dnf`) | exit 1, conflict | machine-specific ✓ |\n| adds `font = mono`, not adjacent to a divergent line | exit 0, clean | generic ✓ |\n\nNote the third row: this is exactly the case a provenance lookup **cannot** answer, since\na newly added line has no provenance to look up. Merge handles it because it classifies by\n*position relative to divergence*, not by lookup.\n\n### Known failure mode: adjacency\n\nAn addition placed **immediately adjacent** to a machine-divergent line produces a false\nconflict — the diff hunk swallows both:\n\n```\nbase(arch)   ...  pkg = pacman\nours(rhel)   ...  pkg = dnf\ntheirs(live) ...  pkg = pacman\n                  font = mono     ← generic addition, but at EOF next to divergent pkg\n→ CONFLICT (false \"machine-specific\")\n```\n\n**mergiraf does not rescue this case.** Verified: with `.toml` extensions and both with and\nwithout a `[section]` header, mergiraf 0.18.0 produced the same conflict. It *does*\ncommutatively merge genuinely independent additions on both sides (verified: two new keys\nadded to the same `[section]` merged cleanly), but the adjacency shape above defeats it.\n\nThis is acceptable because **the failure direction is safe**: it over-reports\nmachine-specific, which routes to the human. It never silently files a machine-specific\nedit into the generic body. Misclassification costs a prompt, not a wrong write.\n\n### Cascade\n\nWhatever conflicts remain go, in order, to: **mergiraf → rerere → human**. This ordering\nis what git does natively once both are registered — the merge driver runs first, rerere\nthen replays any recorded resolution, and the remainder surfaces to you. Nothing to build."
+}
+```
+
+**Output:**
+```
+Edit applied successfully.
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 16.0s)
+
+_Thinking:_
+
+I need to review the consistency across a few sections—the write-back explanation, the render-diff reference, and the sidecar section. The render-diff limitation about misclassifying identical text across branches still holds, and the sidecar's position-based classification is consistent with that. I'll update the sidecar section to reference the merge test, though it's a minor adjustment.
+
+I should also check whether the "hint" wording about changed lines being identical across renders needs updating to fit the merge framing better. After that, I'll look at the bootstrap section to see if I need to add the mergiraf packaging facts I just confirmed—specifically the curl and pacman details—or if they're already covered in the existing content around lines 252-330.
+
+**Tool: read**
+
+**Input:**
+```json
+{
+  "filePath": "/home/istan/dotter/docs/DESIGN.md",
+  "limit": 80,
+  "offset": 305
+}
+```
+
+**Output:**
+```
+<path>/home/istan/dotter/docs/DESIGN.md</path>
+<type>file</type>
+<content>
+305: - `target = ""` disables a file. With an array: whole-value `""` disables everything;
+306:   individual entries carry their own `if` instead.
+307: - local.toml overriding a source key **replaces the entire array**, not element-wise.
+308:   Predictable, and matches existing override semantics.
+309: 
+310: ## Bootstrap
+311: 
+312: Bare-system seamlessness is a hard requirement: a fresh Arch install has neither `git`
+313: nor `mergiraf`.
+314: 
+315: ### What is already available
+316: 
+317: - **`curl` is guaranteed on bare Arch** — verified: `pacman` hard-depends on `curl`,
+318:   and `base` depends on `pacman`. So `curl ... | sh` is a safe entry point.
+319: - **`git` is NOT** — verified: not in `base`'s dependency list.
+320: 
+321: ### Prebuilt binaries make this mostly trivial
+322: 
+323: Both dotter and mergiraf ship static release binaries:
+324: 
+325: | | targets | size |
+326: |---|---|---|
+327: | dotter | linux-x64-musl, linux-arm64-musl, macos-arm64, windows-x64-msvc | 3–5 MB |
+328: | mergiraf | linux x64/arm64 gnu+musl, macos x64/arm64, windows x64 | ~6.5 MB |
+329: 
+330: So **mergiraf is fetched exactly like dotter's own binary** — no package manager, works on
+331: a bare system. It is also packaged in arch `extra`, homebrew, chocolatey, nixpkgs, alpine,
+332: opensuse TW, macports, gentoo, guix and openbsd, but **not** in debian/ubuntu/fedora —
+333: which is why direct binary download is the reliable path rather than PM delegation.
+334: 
+335: ### The one genuine system dependency: git
+336: 
+337: There is no portable static git. The installer therefore needs a narrow `ensure_git` step
+338: shelling out to the native package manager — `pacman` / `apt` / `dnf` / `zypper` / `apk` /
+339: `brew` / `winget`. One package, named literally `git` in every one of them: ~15 lines of
+340: `case`. Needs root; use `sudo` when not already root, and fail loudly with the exact
+341: command when neither is possible.
+342: 
+343: This is **not** the package-manager-abstraction tarpit rejected below — that concerns
+344: installing the user's arbitrary application list.
+345: 
+346: ### Installer flow
+347: 
+348: ```
+349: detect os/arch
+350:   → ensure git (native PM)
+351:   → download dotter release binary
+352:   → download mergiraf release binary   (--no-mergiraf to skip)
+353:   → git clone <repo>
+354:   → pick machine from settings.machines (hostname first, prompt as fallback)
+355:   → dotter setup-git
+356:   → dotter deploy
+357: ```
+358: 
+359: Target UX: `curl <host>/install.sh | sh -s viktorashi` — defaults to
+360: `viktorashi/dotfiles`, accepts a full remote URL.
+361: 
+362: ### `dotter doctor`
+363: 
+364: Precedent: `chezmoi doctor` ("Check for potential problems"). No dotter issue requests it,
+365: so the design space is uncontested.
+366: 
+367: Reports: git version, mergiraf presence and version, `rerere.enabled`, merge driver
+368: registered, `merge.conflictStyle`, detected machine, cache validity.
+369: 
+370: **mergiraf is an optional dependency, but a loud one.** Dotter degrades to plain
+371: `git merge-file` without it. It is advertised in three places: `doctor`, the post-install
+372: summary, and — most importantly — at the moment of pain, when `TemplateComparison::Changed`
+373: fires and mergiraf is absent, printing the exact install command for the detected OS.
+374: 
+375: If upstream later wants it first-class, that is the maintainer's call to make once the
+376: value is demonstrated.
+377: 
+378: ### Explicitly out of scope
+379: 
+380: - **Package-manager abstraction for arbitrary applications** (scoop/yay/brew/cargo
+381:   install lists). Known tarpit, and dotter already has the right extension point:
+382:   `pre_deploy` hooks. "Install my packages" is a user hook script.
+383: - **Reimplementing rerere or a merge driver inside dotter.**
+384: 
+
+(Showing lines 305-384 of 458. Use offset=385 to continue.)
+</content>
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 14.0s)
+
+_Thinking:_
+
+I need to double-check the bootstrap dependency chain—I confirmed pacman depends on curl, but I didn't actually verify that base depends on pacman, so I should either verify that properly or be more cautious with the claim. Also noting that mergiraf comes in at around 6.5M.
+
+The tar.gz is only that size, but the extracted binary balloons to 74MB—that's a substantial difference and definitely changes whether it qualifies as "chunky," so I should correct the documentation to reflect the actual extracted size.
+
+Two corrections needed in the bootstrap section — one size figure is badly wrong:
+
+**Tool: bash**
+
+**Input:**
+```json
+{
+  "command": "echo \"=== does Arch 'base' depend on pacman? ===\"\ncurl -s \"https://archlinux.org/packages/search/json/?name=base&repo=Core\" | python3 -c \"\nimport sys,json;r=json.load(sys.stdin)['results']\nprint('base depends:', r[0]['depends'] if r else 'NOT FOUND')\" 2>/dev/null\necho\necho \"=== mergiraf: compressed vs EXTRACTED size ===\"\nls -l /tmp/opencode/mg.tar.gz | awk '{printf \\\"  tarball:  %.1f MB\\n\\\", $5/1048576}'\nls -l /tmp/opencode/mergiraf | awk '{printf \\\"  extracted: %.1f MB\\n\\\", $5/1048576}'"
+}
+```
+
+**Output:**
+```
+=== does Arch 'base' depend on pacman? ===
+base depends: ['archlinux-keyring', 'bash', 'bzip2', 'coreutils', 'file', 'filesystem', 'findutils', 'gawk', 'gcc-libs', 'gettext', 'glibc', 'grep', 'gzip', 'iproute2', 'iputils', 'licenses', 'pacman', 'pciutils', 'procps-ng', 'psmisc', 'sed', 'shadow', 'systemd', 'systemd-sysvcompat', 'tar', 'util-linux', 'xz']
+
+=== mergiraf: compressed vs EXTRACTED size ===
+awk: cmd. line:1: {printf \"  tarball:  %.1f MB\n\", $5/1048576}
+awk: cmd. line:1:         ^ backslash not last character on line
+awk: cmd. line:1: {printf \"  extracted: %.1f MB\n\", $5/1048576}
+awk: cmd. line:1:         ^ backslash not last character on line
+
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 17.9s)
+
+_Thinking:_
+
+The dependency chain checks out—base needs pacman, pacman needs curl, and git isn't in base dependencies. Now I'm looking at the mergiraf extraction size: it's about 71 MB uncompressed but only 6.7 MB as a tarball, which is roughly a 10x compression ratio that should be reflected in the documentation. I need to update the size table to correct this.
+
+`base` → `pacman` → `curl` confirmed, and `git` is indeed absent. But the mergiraf size is off by 10x:
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "filePath": "/home/istan/dotter/docs/DESIGN.md",
+  "newString": "| | targets | download | on disk |\n|---|---|---|---|\n| dotter | linux-x64-musl, linux-arm64-musl, macos-arm64, windows-x64-msvc | 3–5 MB | 3–5 MB |\n| mergiraf | linux x64/arm64 gnu+musl, macos x64/arm64, windows x64 | 6.4–7.1 MB | **71 MB** |\n\n> The mergiraf tarball is ~6.7 MB but **extracts to 71 MB** (measured, v0.18.0\n> x86_64-unknown-linux-gnu) — ~30 bundled tree-sitter grammars. That is 15× dotter's own\n> binary, and is the concrete reason it stays an *optional* fetch with `--no-mergiraf`,\n> and the reason it is depended on as a **binary rather than a crate**.\n\nSo **mergiraf is fetched exactly like dotter's own binary** — no package manager, works on\na bare system. It is also packaged in arch `extra`, homebrew, chocolatey, nixpkgs, alpine,\nopensuse TW, macports, gentoo, guix and openbsd, but **not** in debian/ubuntu/fedora —\nwhich is why direct binary download is the reliable path rather than PM delegation.\nPrefer the system package when present (it is shared and already on disk); fall back to\nthe tarball.",
+  "oldString": "| | targets | size |\n|---|---|---|\n| dotter | linux-x64-musl, linux-arm64-musl, macos-arm64, windows-x64-msvc | 3–5 MB |\n| mergiraf | linux x64/arm64 gnu+musl, macos x64/arm64, windows x64 | ~6.5 MB |\n\nSo **mergiraf is fetched exactly like dotter's own binary** — no package manager, works on\na bare system. It is also packaged in arch `extra`, homebrew, chocolatey, nixpkgs, alpine,\nopensuse TW, macports, gentoo, guix and openbsd, but **not** in debian/ubuntu/fedora —\nwhich is why direct binary download is the reliable path rather than PM delegation."
+}
+```
+
+**Output:**
+```
+Edit applied successfully.
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 8.7s)
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "filePath": "/home/istan/dotter/docs/DESIGN.md",
+  "newString": "- **`curl` is guaranteed on bare Arch** — verified against the Arch package API:\n  `base` depends on `pacman`, and `pacman` hard-depends on `curl` (the binary package,\n  not just `libcurl`). So `curl ... | sh` is a safe entry point.\n- **`git` is NOT** — verified: absent from `base`'s dependency list.",
+  "oldString": "- **`curl` is guaranteed on bare Arch** — verified: `pacman` hard-depends on `curl`,\n  and `base` depends on `pacman`. So `curl ... | sh` is a safe entry point.\n- **`git` is NOT** — verified: not in `base`'s dependency list."
+}
+```
+
+**Output:**
+```
+Edit applied successfully.
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 8.9s)
+
+**Tool: edit**
+
+**Input:**
+```json
+{
+  "filePath": "/home/istan/dotter/docs/DESIGN.md",
+  "newString": "> Merge on the **rendered output** (safe and exact: base = `.dotter/cache/`, ours = live\n> target, theirs = fresh render). Then *show* the classification as a **hint** — \"this\n> edit merges cleanly against every other machine's render → likely generic; this one\n> conflicts against `work-rhel` → likely machine-specific\" — and open the template\n> annotated with it. The human presses the button.",
+  "oldString": "> Merge on the **rendered output** (safe and exact: base = `.dotter/cache/`, ours = live\n> target, theirs = fresh render). Then *show* the classification as a **hint** — \"changed\n> lines 12-14 are identical across all machines' renders → likely generic; line 20 differs\n> → likely `work-rhel`-specific\" — and open the template annotated with it. The human\n> presses the button."
+}
+```
+
+**Output:**
+```
+Edit applied successfully.
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 9.6s)
+
+**Tool: bash**
+
+**Input:**
+```json
+{
+  "command": "cd /home/istan/dotter && git add -A docs/ && git commit -q -m \"docs: classification-by-3-way-merge (verified), fix mergiraf size, bootstrap facts\" && git push viktorashi viktorashi 2>&1 | tail -2 && rm -rf /tmp/opencode/clf /tmp/opencode/rrtest /tmp/opencode/shared-rr /tmp/opencode/mg.tar.gz /tmp/opencode/mergiraf"
+}
+```
+
+**Output:**
+```
+To https://github.com/viktorashi/dotter
+   0c4e323..3dfa2fd  viktorashi -> viktorashi
+
+```
+
+---
+
+## Assistant (Build · Claude Opus 5 · 16.8s)
+
+Both lost threads were already in the committed doc — but re-examining them produced a real simplification and caught a bad number.
+
+**On your provenance idea — you talked yourself into the right answer.** In-band comments are self-defeating: any app that does deserialize→mutate→serialize drops comments by construction, and those are exactly the apps in scope. The annotation dies from the event it exists to survive. The sidecar survives but, as you spotted, doesn't answer generic-vs-specific — and it can't handle an app *adding* a new setting, since a new line has no provenance to look up.
+
+**What that pushed me to: the classification is just a 3-way merge.** No line-range map, no new parser, no template introspection. For an edit seen on machine `M`, against each other machine `K`: `base = render(M)`, `ours = render(K)`, `theirs = live file`. Clean merge → generic. Conflict → M-specific. That's literally what a conflict *means*: ours diverged from base in the same region.
+
+Verified with `git merge-file`:
+
+| edit on `arch` | result | verdict |
+|---|---|---|
+| `theme=dark→light` (same on both renders) | clean | generic ✓ |
+| `pkg=pacman→yay` (rhel has `dnf`) | conflict | machine-specific ✓ |
+| adds `font=mono`, not adjacent to a divergent line | clean | generic ✓ |
+
+Row 3 is precisely the case provenance can't do.
+
+**And I found where it breaks, so I'll state it rather than sell it.** An addition placed *immediately adjacent* to a machine-divergent line gives a false conflict — the hunk swallows both. **mergiraf does not fix this**; I downloaded 0.18.0 and tested it with `.toml` extensions, with and without a `[section]` header — same conflict. It *does* commutatively merge genuinely independent additions (two new keys in one section merged clean), just not that shape. Failure direction is safe: it over-reports machine-specific, which routes to you. Never a silent wrong write.
+
+**Bad number caught:** the doc claimed mergiraf is ~6.5 MB. That's the tarball — it **extracts to 71 MB** (~30 tree-sitter grammars), 15× dotter's own binary. That's the concrete justification for `--no-mergiraf` and for depending on the binary rather than the crate. Also added: prefer the system package when present, since it's shared.
+
+**Bootstrap facts now properly verified** against the Arch package API: `base` → `pacman` → `curl` (the binary package, not just `libcurl`), so `curl | sh` is safe on a bare install; `git` is genuinely absent from `base`.
+
+Pushed as `3dfa2fd`. Phase 0 still stands — test corpus or the debounce probe first?
 
 ---
 
