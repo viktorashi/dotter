@@ -353,19 +353,96 @@ installing the user's arbitrary application list.
 
 ### Installer flow
 
+Implemented: [`bootstrap/install.sh`](../bootstrap/install.sh) (POSIX sh — verified
+against `dash` and `bash`) and [`bootstrap/install.ps1`](../bootstrap/install.ps1)
+(PowerShell 5.1+, ships with Win10/11).
+
 ```
 detect os/arch
-  → ensure git (native PM)
-  → download dotter release binary
-  → download mergiraf release binary   (--no-mergiraf to skip)
+  → ensure git          (native PM — the ONLY package-manager use)
+  → install dotter      (static binary download)
+  → install mergiraf    (system package first, binary download second,
+                         cargo third, skip fourth — never fatal)
   → git clone <repo>
-  → pick machine from settings.machines (hostname first, prompt as fallback)
-  → dotter setup-git
+  → dotter init-machine (fzf-style picker, below)
+  → dotter setup-git    (rerere + merge driver + .gitattributes)
   → dotter deploy
 ```
 
-Target UX: `curl <host>/install.sh | sh -s viktorashi` — defaults to
-`viktorashi/dotfiles`, accepts a full remote URL.
+**The entry point is self-proving:** if you can run `curl … | sh`, you have curl and a
+shell. Nothing else is assumed.
+
+Target UX:
+
+```sh
+curl -fsSL <host>/install.sh | sh -s viktorashi           # → github.com/viktorashi/dotfiles
+curl -fsSL <host>/install.sh | sh -s viktorashi/my-config
+curl -fsSL <host>/install.sh | sh -s git@host:me/dots.git
+```
+
+```powershell
+& ([scriptblock]::Create((irm <host>/install.ps1))) viktorashi
+```
+
+Verified end-to-end on Ubuntu 26.04 x86_64: platform detection, asset-name mapping,
+remote resolution for all four argument shapes, real download of `dotter` 0.13.5 and
+`mergiraf` 0.18.0 into a sandbox prefix, and the graceful-degradation path when the
+mergiraf download fails.
+
+#### Codeberg is unreliable; plan for it
+
+mergiraf's only binary source is codeberg, and its release downloads fail often —
+observed `HTTP/2 stream CANCEL (err 8)` and truncated HTTP/1.1 bodies on repeated
+attempts within minutes. There is **no GitHub release mirror** (`qundao/mirror-mergiraf`
+mirrors source only, no release assets).
+
+Mitigations, in the script:
+
+1. **System package first** — arch `extra`, alpine, homebrew, opensuse, nixpkgs, gentoo,
+   chocolatey. Shared, updated, and avoids codeberg entirely.
+2. `--retry 5 --retry-delay 2 --retry-all-errors -C -` (resume, not restart). Verified:
+   the download that failed three times in a row succeeded with these flags.
+3. `cargo install mergiraf` if cargo is present.
+4. Warn and continue. mergiraf is optional by design.
+
+Not in debian/ubuntu/fedora/scoop; **is** in chocolatey (verified).
+
+### `dotter init-machine` — the machine picker
+
+Answers "on a brand-new machine, which existing config do I fork from?" without
+hand-editing TOML.
+
+1. **Probe** hostname, OS, and distro — `/etc/os-release` `ID`/`VERSION_ID` on Linux,
+   `sw_vers` on macOS, build number on Windows.
+2. **Read** `[settings.machines]` from the freshly cloned `global.toml`.
+3. **Rank** candidates by similarity to the probe (same os+distro first), preselecting the
+   best match.
+4. **Present** an fzf-style filter-as-you-type list, plus a "blank profile" entry:
+
+```
+? which machine should this one inherit from?  (type to filter)
+> arch-laptop    linux/arch      ← best match for this machine (linux/arch)
+  desktop        linux/arch
+  work-rhel      linux/rhel
+  win-work       windows/10
+  ─────────────
+  (blank profile)
+```
+
+5. **Write** the choice:
+   - `.dotter/local.toml` ← `packages` from the chosen machine *(untracked, per-machine)*
+   - `[settings.machines.<hostname>] inherits = "<chosen>"` appended to `global.toml`
+     *(tracked — this is the "fork")*
+6. **Print** `review and commit .dotter/global.toml`.
+
+So a new machine is: run the installer, pick from a list, commit one line.
+
+**Implementation: `inquire`.** Its default features are
+`["macros", "crossterm", "one-liners", "fuzzy"]` and it requires `crossterm ^0.29.0` —
+which dotter **already pins at 0.29.0**. So `inquire = "0.9"` gives fuzzy filtering while
+reusing the existing terminal backend, with no feature fiddling and no second terminal
+stack. `dialoguer` was rejected: it hard-depends on `console`, an entire parallel
+terminal library.
 
 ### `dotter doctor`
 
@@ -431,6 +508,16 @@ maintainer merge a small obviously-correct fix, and how fast?
 
 `FileTarget::Many`, cache versioning + migration, the two semantics above. Closes **#186**.
 Port the real dotfiles to it — that is the demo.
+
+### Phase 1b — `dotter init-machine` + bootstrap scripts
+
+`inquire`-based machine picker, plus the two installer scripts (already drafted in
+`bootstrap/`). Depends on declared machines existing, but not on classification, so it can
+land before Phase 3.
+
+**Stays in the fork, not upstreamed.** The bootstrap scripts assume `settings.machines`
+and `dotter setup-git`, neither of which exists upstream; and a `curl | sh` installer is a
+project-identity decision that belongs to the maintainer, not a contributor.
 
 ### Phase 2 — `dotter merge` + `dotter setup-git`
 
