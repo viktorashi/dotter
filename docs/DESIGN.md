@@ -127,15 +127,73 @@ not invertible. The trick that avoids needing it:
 > each other.** Lines identical across all N renders are generic. Lines that differ are
 > machine-specific, and you know exactly which branch produced them.
 
-That yields a line-range → branch map with **zero template introspection** — no
-handlebars AST, no provenance instrumentation.
+That yields a classification with **zero template introspection** — no handlebars AST, no
+provenance instrumentation.
 
-An incoming live edit then classifies itself:
+### The classification *is* a three-way merge (verified)
 
-- entirely within generic lines → apply to the template body
-- entirely within one machine's exclusive lines → apply to that `{{#if}}` branch
-- spans both, or lands inside a `{{variable}}` substitution → **emit the artificial
-  conflict**, hand to mergiraf → rerere → human
+Comparing renders line-by-line and maintaining a line-range map is more machinery than
+needed. The question "is this edit generic or machine-specific?" is already answered
+exactly by a 3-way merge we can run with tools we depend on anyway.
+
+For an edit observed on machine `M`, and for each other declared machine `K`:
+
+```
+base   = render(M)          # what M looked like before the app touched it == .dotter/cache/
+ours   = render(K)          # what K currently renders to
+theirs = live file on M     # base + the app's edit
+```
+
+- **merges cleanly** → the edited region is identical across M and K → the edit is
+  **generic**
+- **conflicts** → K diverges from M in that region → the edit is **M-specific**
+
+That is precisely `git merge-file` semantics: a conflict arises iff *ours* also changed
+relative to *base* in the same region — which is the definition of "this region is
+machine-divergent".
+
+No line-range map, no new parser, no template introspection. `N-1` invocations of a
+binary already in the design.
+
+Verified empirically (`git merge-file --diff3`):
+
+| edit on `arch` | result | classification |
+|---|---|---|
+| `theme = dark` → `light` (identical on both renders) | exit 0, clean | generic ✓ |
+| `pkg = pacman` → `yay` (differs: rhel has `dnf`) | exit 1, conflict | machine-specific ✓ |
+| adds `font = mono`, not adjacent to a divergent line | exit 0, clean | generic ✓ |
+
+Note the third row: this is exactly the case a provenance lookup **cannot** answer, since
+a newly added line has no provenance to look up. Merge handles it because it classifies by
+*position relative to divergence*, not by lookup.
+
+### Known failure mode: adjacency
+
+An addition placed **immediately adjacent** to a machine-divergent line produces a false
+conflict — the diff hunk swallows both:
+
+```
+base(arch)   ...  pkg = pacman
+ours(rhel)   ...  pkg = dnf
+theirs(live) ...  pkg = pacman
+                  font = mono     ← generic addition, but at EOF next to divergent pkg
+→ CONFLICT (false "machine-specific")
+```
+
+**mergiraf does not rescue this case.** Verified: with `.toml` extensions and both with and
+without a `[section]` header, mergiraf 0.18.0 produced the same conflict. It *does*
+commutatively merge genuinely independent additions on both sides (verified: two new keys
+added to the same `[section]` merged cleanly), but the adjacency shape above defeats it.
+
+This is acceptable because **the failure direction is safe**: it over-reports
+machine-specific, which routes to the human. It never silently files a machine-specific
+edit into the generic body. Misclassification costs a prompt, not a wrong write.
+
+### Cascade
+
+Whatever conflicts remain go, in order, to: **mergiraf → rerere → human**. This ordering
+is what git does natively once both are registered — the merge driver runs first, rerere
+then replays any recorded resolution, and the remainder surfaces to you. Nothing to build.
 
 ### Rejected alternative: in-band provenance comments
 
@@ -174,10 +232,10 @@ Neither mechanism is sound enough to justify automatic write-back into a templat
 does not attempt it:
 
 > Merge on the **rendered output** (safe and exact: base = `.dotter/cache/`, ours = live
-> target, theirs = fresh render). Then *show* the classification as a **hint** — "changed
-> lines 12-14 are identical across all machines' renders → likely generic; line 20 differs
-> → likely `work-rhel`-specific" — and open the template annotated with it. The human
-> presses the button.
+> target, theirs = fresh render). Then *show* the classification as a **hint** — "this
+> edit merges cleanly against every other machine's render → likely generic; this one
+> conflicts against `work-rhel` → likely machine-specific" — and open the template
+> annotated with it. The human presses the button.
 
 No template inversion, no invertibility risk, roughly a third of the code. Automatic
 write-back is **Phase 3b**, gated on the hint proving reliable in practice.
@@ -256,23 +314,31 @@ nor `mergiraf`.
 
 ### What is already available
 
-- **`curl` is guaranteed on bare Arch** — verified: `pacman` hard-depends on `curl`,
-  and `base` depends on `pacman`. So `curl ... | sh` is a safe entry point.
-- **`git` is NOT** — verified: not in `base`'s dependency list.
+- **`curl` is guaranteed on bare Arch** — verified against the Arch package API:
+  `base` depends on `pacman`, and `pacman` hard-depends on `curl` (the binary package,
+  not just `libcurl`). So `curl ... | sh` is a safe entry point.
+- **`git` is NOT** — verified: absent from `base`'s dependency list.
 
 ### Prebuilt binaries make this mostly trivial
 
 Both dotter and mergiraf ship static release binaries:
 
-| | targets | size |
-|---|---|---|
-| dotter | linux-x64-musl, linux-arm64-musl, macos-arm64, windows-x64-msvc | 3–5 MB |
-| mergiraf | linux x64/arm64 gnu+musl, macos x64/arm64, windows x64 | ~6.5 MB |
+| | targets | download | on disk |
+|---|---|---|---|
+| dotter | linux-x64-musl, linux-arm64-musl, macos-arm64, windows-x64-msvc | 3–5 MB | 3–5 MB |
+| mergiraf | linux x64/arm64 gnu+musl, macos x64/arm64, windows x64 | 6.4–7.1 MB | **71 MB** |
+
+> The mergiraf tarball is ~6.7 MB but **extracts to 71 MB** (measured, v0.18.0
+> x86_64-unknown-linux-gnu) — ~30 bundled tree-sitter grammars. That is 15× dotter's own
+> binary, and is the concrete reason it stays an *optional* fetch with `--no-mergiraf`,
+> and the reason it is depended on as a **binary rather than a crate**.
 
 So **mergiraf is fetched exactly like dotter's own binary** — no package manager, works on
 a bare system. It is also packaged in arch `extra`, homebrew, chocolatey, nixpkgs, alpine,
 opensuse TW, macports, gentoo, guix and openbsd, but **not** in debian/ubuntu/fedora —
 which is why direct binary download is the reliable path rather than PM delegation.
+Prefer the system package when present (it is shared and already on disk); fall back to
+the tarball.
 
 ### The one genuine system dependency: git
 
