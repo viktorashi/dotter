@@ -1,3 +1,4 @@
+Hi! There are some part os this convo u missed cuz of some technical problems. Rewind and address
 ## User
 
 yeah, mergifrraf is "optional" runtime dep but somehow being super loud that IT WOULD WOKR SUPER COOL IF YOU HAD THIS. would also work nicely. Then alter down the road we could have the maintner tell us if he's like it to be first-class.
