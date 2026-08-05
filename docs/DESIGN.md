@@ -137,6 +137,51 @@ An incoming live edit then classifies itself:
 - spans both, or lands inside a `{{variable}}` substitution → **emit the artificial
   conflict**, hand to mergiraf → rerere → human
 
+### Rejected alternative: in-band provenance comments
+
+Annotating the rendered output with comments saying which branch each region came from
+is **self-defeating**. The apps in scope are exactly the ones that rewrite their own
+config, and any app that does deserialize → mutate → serialize with a standard library
+(`serde`, Go `encoding/json`, `gopkg.in/yaml`) **drops comments by construction**. The
+annotation is destroyed by precisely the event it exists to survive. Strict JSON has no
+comments at all. (VSCode is a counterexample — it edits jsonc in place and preserves
+comments — but it is the minority.)
+
+### Accepted, but insufficient: a sidecar provenance file
+
+A sidecar recording *"this output came from template T, machine M, template hash H"*
+survives app rewrites and is cheap. It makes the merge base bulletproof and distinguishes
+*template changed* from *target changed*. Since `.dotter/cache/` already stores the render,
+this is roughly "add a template hash", ~5 lines. Worth doing.
+
+It does **not** solve classification. Provenance maps *existing* output lines back to
+template nodes. An app that adds a **new** setting produces a line with no provenance to
+look up — and that is the common case. Render-diff handles it because it classifies by
+*position*, not by lookup.
+
+### Why write-back stays manual in v1
+
+Render-diff is not exact either. It misclassifies when two branches render identical text:
+
+```hbs
+{{#if linux}}editor = vim{{else}}editor = vim{{/if}}
+```
+
+Identical across variants → classified "generic" → but there is no generic body to write
+into. Ambiguous.
+
+Neither mechanism is sound enough to justify automatic write-back into a template. So v1
+does not attempt it:
+
+> Merge on the **rendered output** (safe and exact: base = `.dotter/cache/`, ours = live
+> target, theirs = fresh render). Then *show* the classification as a **hint** — "changed
+> lines 12-14 are identical across all machines' renders → likely generic; line 20 differs
+> → likely `work-rhel`-specific" — and open the template annotated with it. The human
+> presses the button.
+
+No template inversion, no invertibility risk, roughly a third of the code. Automatic
+write-back is **Phase 3b**, gated on the hint proving reliable in practice.
+
 ### The constraint this requires
 
 Rendering all variants from one machine is only possible if every branching input is
@@ -206,25 +251,78 @@ crisp answers here is most of what gets it merged):
 
 ## Bootstrap
 
-Dotter already publishes prebuilt binaries: `dotter-linux-x64-musl`,
-`dotter-linux-arm64-musl`, `dotter-macos-arm64`, `dotter-windows-x64-msvc.exe`.
+Bare-system seamlessness is a hard requirement: a fresh Arch install has neither `git`
+nor `mergiraf`.
 
-So the installer is ~30 lines:
+### What is already available
+
+- **`curl` is guaranteed on bare Arch** — verified: `pacman` hard-depends on `curl`,
+  and `base` depends on `pacman`. So `curl ... | sh` is a safe entry point.
+- **`git` is NOT** — verified: not in `base`'s dependency list.
+
+### Prebuilt binaries make this mostly trivial
+
+Both dotter and mergiraf ship static release binaries:
+
+| | targets | size |
+|---|---|---|
+| dotter | linux-x64-musl, linux-arm64-musl, macos-arm64, windows-x64-msvc | 3–5 MB |
+| mergiraf | linux x64/arm64 gnu+musl, macos x64/arm64, windows x64 | ~6.5 MB |
+
+So **mergiraf is fetched exactly like dotter's own binary** — no package manager, works on
+a bare system. It is also packaged in arch `extra`, homebrew, chocolatey, nixpkgs, alpine,
+opensuse TW, macports, gentoo, guix and openbsd, but **not** in debian/ubuntu/fedora —
+which is why direct binary download is the reliable path rather than PM delegation.
+
+### The one genuine system dependency: git
+
+There is no portable static git. The installer therefore needs a narrow `ensure_git` step
+shelling out to the native package manager — `pacman` / `apt` / `dnf` / `zypper` / `apk` /
+`brew` / `winget`. One package, named literally `git` in every one of them: ~15 lines of
+`case`. Needs root; use `sudo` when not already root, and fail loudly with the exact
+command when neither is possible.
+
+This is **not** the package-manager-abstraction tarpit rejected below — that concerns
+installing the user's arbitrary application list.
+
+### Installer flow
 
 ```
-detect os/arch → download release binary → git clone <repo> → dotter deploy
+detect os/arch
+  → ensure git (native PM)
+  → download dotter release binary
+  → download mergiraf release binary   (--no-mergiraf to skip)
+  → git clone <repo>
+  → pick machine from settings.machines (hostname first, prompt as fallback)
+  → dotter setup-git
+  → dotter deploy
 ```
 
 Target UX: `curl <host>/install.sh | sh -s viktorashi` — defaults to
-`viktorashi/dotfiles`, accepts a full remote URL, picks the machine from
-`settings.machines` (hostname first, prompt as fallback).
+`viktorashi/dotfiles`, accepts a full remote URL.
 
-**Explicitly out of scope:**
+### `dotter doctor`
 
-- **Package-manager abstraction** (scoop/yay/brew/cargo). Known tarpit, and dotter
-  already has the right extension point: `pre_deploy` hooks. "Install my packages" is a
-  user hook script, not dotter's job.
-- **mergiraf as a hard dependency.** Only needed at conflict time. Install lazily.
+Precedent: `chezmoi doctor` ("Check for potential problems"). No dotter issue requests it,
+so the design space is uncontested.
+
+Reports: git version, mergiraf presence and version, `rerere.enabled`, merge driver
+registered, `merge.conflictStyle`, detected machine, cache validity.
+
+**mergiraf is an optional dependency, but a loud one.** Dotter degrades to plain
+`git merge-file` without it. It is advertised in three places: `doctor`, the post-install
+summary, and — most importantly — at the moment of pain, when `TemplateComparison::Changed`
+fires and mergiraf is absent, printing the exact install command for the detected OS.
+
+If upstream later wants it first-class, that is the maintainer's call to make once the
+value is demonstrated.
+
+### Explicitly out of scope
+
+- **Package-manager abstraction for arbitrary applications** (scoop/yay/brew/cargo
+  install lists). Known tarpit, and dotter already has the right extension point:
+  `pre_deploy` hooks. "Install my packages" is a user hook script.
+- **Reimplementing rerere or a merge driver inside dotter.**
 
 ## Git setup
 
