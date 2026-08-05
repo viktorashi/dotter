@@ -205,8 +205,8 @@ clone_repo
 
 cd "$DOTFILES"
 say "selecting machine profile"
-dotter init-machine          # fzf-style picker; writes local.toml, may extend global.toml
-dotter setup-git             # rerere + mergiraf merge driver + .gitattributes
+dotter init-machine || \  # fzf-style picker; writes local.toml, may extend global.toml
+dotter setup-git || \     # rerere + mergiraf merge driver + .gitattributes
 dotter deploy
 
 say "done"
