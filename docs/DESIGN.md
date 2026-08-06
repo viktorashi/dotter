@@ -320,7 +320,7 @@ sharing most of its functionality. One tree, all machines, is the point.
 ```toml
 # 1. conditional file: parsed always, deployed only where the condition holds
 [core.files]
-"wsl/wsl.conf" = { target = "/etc/wsl.conf", if = "(eq profile \"windows\")" }
+"arch/pacman.conf" = { target = "/etc/pacman.conf", owner = "root", if = "(eq profile \"arch\")" }
 
 # 2. packages: local.toml selects which sets deploy at all
 [work.files]
@@ -329,11 +329,20 @@ sharing most of its functionality. One tree, all machines, is the point.
 
 ```toml
 # local.toml on the work box
+profile  = "rhel"
 packages = ["core", "work"]
 ```
 
 Use `if` for one-off files, packages for coherent groups. Both are per-file/per-group
 existence, orthogonal to per-file *content*, which is what templating handles.
+
+> **WSL is its own profile, not "windows".** `/etc/wsl.conf` lives *inside* the Linux
+> distro, so under WSL `dotter.linux` is true and `dotter.windows` is false — verified
+> earlier: WSL and native Windows are separate compiled binaries. A machine running both
+> deploys twice, once per environment, and they are two different profiles
+> (`wsl` and `windows`) selected by two different `local.toml` files. Nothing is ever
+> tagged as both.
+
 
 For classification this is the easy case: a file present in only one variant has nothing
 to compare against in the others, so it is trivially machine-specific. No ambiguity.
@@ -472,36 +481,68 @@ Not in debian/ubuntu/fedora/scoop; **is** in chocolatey (verified).
 
 ### Why two scripts and not one
 
-The obvious wish is a single script that detects your shell and routes itself. Two ways to
-read that, and they land differently:
+Two separate questions hide here, and they have different answers.
 
-**One *file* that is simultaneously valid POSIX sh and valid PowerShell.** Polyglot tricks
-exist (the `@echo off` / `:;` batch-and-sh hack is the famous one), but they work by
-exploiting parser quirks in both languages at once. The result is unreadable, breaks on any
-edit, and cannot be linted by either language's tools. It buys nothing a second file
-doesn't, and costs the ability to maintain it. Rejected.
+#### Can one *command* work on both? No — and this is provable
 
-**One *URL* that serves the right script.** This is the real ask — the complaint is "I have
-to know which command to run", not "there must be one file". It works, because the clients
-are trivially distinguishable by `User-Agent`:
+The command has three parts: **fetcher**, **transport**, **interpreter**. Unification fails
+on two of the three.
+
+| | bare Linux | bare Windows 10+ |
+|---|---|---|
+| interpreters | `sh` | `cmd`, `powershell` |
+| fetchers | `curl` / `wget` | `curl.exe`, `Invoke-WebRequest` |
+
+**The interpreter intersection is empty.** There is no name that means "execute this
+script" on both a bare Linux and a bare Windows box. Since the interpreter is the thing
+after the pipe, and the pipe is typed by the user, no single copy-pasteable string exists.
+
+The fetcher does not save it either: Windows 10 1803+ does ship `curl.exe`, but in
+PowerShell 5.1 `curl` is an **alias for `Invoke-WebRequest`**, which rejects `-fsSL`. You
+must write `curl.exe` — which does not exist on Linux.
+
+**A polyglot script file does not help.** Even a file that is simultaneously valid `sh` and
+valid PowerShell still has to be *invoked*, and the invocation (`| sh` vs `| iex`, or
+`sh f` vs `./f`) is the part that differs. The polyglot solves the half of the problem that
+was never the problem.
+
+#### Can one *URL* work on both? Yes
+
+This is the real ask — "I shouldn't have to know which command to run" is mostly "I
+shouldn't have to find a different link". UA routing handles it, because the clients are
+trivially distinguishable:
 
 ```
 curl        →  curl/8.18.0
-PowerShell  →  Mozilla/5.0 (Windows NT ...) WindowsPowerShell/5.1.x
+PowerShell  →  Mozilla/5.0 (Windows NT 10.0; ...) WindowsPowerShell/5.1.x
+PowerShell7 →  Mozilla/5.0 (Windows NT 10.0; ...) PowerShell/7.4.x
 ```
 
-So `install.sh`/`install.ps1` stay as they are, and ~5 lines of server config (nginx `map`,
-a Cloudflare Worker, whatever hosts the domain) route one URL by UA. Zero script
-complexity, and the two files stay independently lintable.
+Implemented in [`bootstrap/router.js`](../bootstrap/router.js) — a Cloudflare Worker, with
+an nginx `map` equivalent in the trailing comment. An explicit `.sh`/`.ps1` suffix always
+overrides the sniff, so the scripts stay directly addressable for CI and for anyone who
+distrusts UA sniffing. Routing verified against 8 real user-agent strings, including both
+PowerShell generations, `Microsoft-CryptoAPI`, empty UA, and explicit-suffix override.
 
-**Note what everyone else does.** bun: `curl -fsSL https://bun.com/install` and
-`powershell -c "irm bun.sh/install.ps1 | iex"`. rustup: `sh.rustup.rs` plus a separate
-`rustup-init.exe`. starship, deno, uv, homebrew: all two entry points. Nobody ships a
-polyglot. That is strong evidence the second file is not the part worth optimising away.
+Result — same URL, and the commands differ only in the unavoidable wrapper:
 
-Also note a hard limit on "detect the shell and route": on a bare Windows box there is no
-`sh` to do the detecting. The routing has to happen *before* a shell runs — i.e. at the
-URL, or in the user's head. There is no third option.
+```sh
+curl -fsSL https://dott.er/i | sh -s viktorashi     # Linux / macOS
+```
+```powershell
+irm https://dott.er/i | iex                          # Windows
+```
+
+#### Where the remaining difference actually goes: the docs page
+
+The user should never *see* both. Detect the OS in JavaScript on the install page and
+render only the relevant snippet — which is what bun, deno and rustup all do. Then the
+experience is genuinely "copy the one command on the page", even though two exist.
+
+Nobody ships a polyglot installer: bun uses `curl -fsSL https://bun.com/install` **and**
+`powershell -c "irm bun.sh/install.ps1 | iex"`; rustup uses `sh.rustup.rs` plus a separate
+`rustup-init.exe`; starship, deno, uv and homebrew all have two entry points. That is
+strong evidence the second file is not the part worth optimising away.
 
 
 
