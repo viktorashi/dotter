@@ -1,5 +1,3 @@
-# AGENTS.md
-
 Repo-local rules for AI agents working on this fork of
 [SuperCuber/dotter](https://github.com/SuperCuber/dotter).
 
@@ -152,3 +150,7 @@ Windows behaviour "unverifiable".
 
 **Clean up after Windows tests.** They write into the real `%USERPROFILE%`; one stray
 `deployed.txt` was created and removed during recon. Watch for `DOTTER_SYMLINK_TEST` too.
+
+## More about the development of it
+
+Ignore `session*` files when grepping or whatever. ignore conigs could be written in here.
