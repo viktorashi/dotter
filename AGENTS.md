@@ -109,6 +109,12 @@ branches are cut fresh from `origin/master` and contain **only** `src/` + `tests
 
 ## Current state
 
-- `master`/`viktorashi` contains a **non-compiling** `src/config.rs` from commit `b07664d`
-  — a half-applied `machine` field. It is the right idea (Phase 3) but was written without
-  agreement. Revert or complete it deliberately; do not build on it accidentally.
+- **`src/` is byte-identical to `origin/master`.** The fork carries only `docs/`,
+  `bootstrap/` and this file. `cargo check` passes. The half-applied `machine` field from
+  `b07664d` is gone.
+- That is the ideal starting point for the stacked-PR plan: every upstream branch can be cut
+  from `origin/master` with no fork noise to strip.
+- Assumptions that have been tested against a running binary are recorded in
+  `docs/DESIGN.md` → *Recon log*. Anything not listed there is still an assumption —
+  in particular **everything Windows-specific is unverified**, because there is no Windows
+  box or container runtime on this host.

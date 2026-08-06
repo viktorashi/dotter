@@ -452,8 +452,9 @@ With it, targets can reference variables:
 
 ```toml
 # global.toml — destination stays next to the source
-"nvim"                 = "{{ config_dir }}/nvim"
-"vscode/settings.json" = "{{ config_dir }}/Code/User/settings.json"
+# NOTE: shell-style ${...}, NOT handlebars {{ ... }} — verified, see Recon log
+"nvim"                 = "${config_dir}/nvim"
+"vscode/settings.json" = "${config_dir}/Code/User/settings.json"
 ```
 
 ```toml
@@ -802,6 +803,107 @@ dotter setup-git → git config rerere.enabled true
 ```
 
 Fresh system → `dotter deploy` → one prompt → configured.
+
+## Recon log — assumptions tested against a running binary
+
+Everything below was executed, not reasoned about. Date: 2026-08. Binary: dotter 0.13.5.
+
+### Confirmed
+
+| claim | result |
+|---|---|
+| **A hard link is not recognised as dotter's own link** | **Confirmed.** Deployed a symlink, replaced the target with a hard link to the same source (verified same inode `4132`), redeployed → `[ERROR] Updating symlink ... but target already exists and isn't a symlink. Skipping.` Phase 1's central finding is real. |
+| **PR #190 merges cleanly onto current `origin/master`** | **Confirmed.** `git merge-tree` reports no conflicts; built and ran it. |
+| **PR #190 does what the plan needs** | **Confirmed.** One `config_dir` variable in a machine file retargeted *both* managed files. |
+| **`inquire` reuses dotter's `crossterm`** | **Confirmed.** `cargo tree -i crossterm` shows a single `crossterm v0.29.0` shared by `dotter` and `inquire`. Adds only 5 crates: `inquire`, `dyn-clone`, `fuzzy-matcher`, `thread_local`, `unicode-width`. No `console`, no `termion`. `cargo check` passes. |
+| **Duplicate source key across packages is a hard error** | **Confirmed.** Deploy fails at config merge. |
+| **Machine-file variables override globals and reach templates** | **Confirmed.** `distro` overridden in the machine file rendered as `arch`; the `{{ }}` file was auto-detected as a template and deployed as a regular file, not a symlink. |
+| **mergiraf-as-registered-git-driver resolves what plain git cannot** | **Confirmed.** Same 3-way merge: plain git → 1 conflict marker; with `merge.mergiraf.driver` + `.gitattributes` → 0 markers, both keys merged. The delegation architecture works. |
+
+### Corrections forced by recon
+
+**1. PR #190 uses `${var}`, not `{{ var }}`.** It calls
+`shellexpand::env_with_context_no_errors`, so the syntax is shell-style. An earlier example
+in this document used handlebars syntax and was wrong — verified that `{{ config_dir }}` is
+taken **literally** and creates a directory of that name. Corrected in *Recovering most of
+the co-location*.
+
+Precedence, measured:
+
+| form | resolves to |
+|---|---|
+| `${defined}` where `defined` is a config variable | the config variable |
+| `${SHADOWED}` defined **both** as config variable and env var | **config wins** |
+| `${MY_ENV_VAR}` not a config variable | the environment |
+| `${MISSING:-fellback}` | `fellback` |
+| `${undefined_anywhere}` — neither | **hard error**: `error looking key 'undefined_anywhere' up: environment variable not found` |
+
+The last row is the same failure class as the expansion-before-`if` bug: a name that is
+absent on this platform aborts config loading. **Every env var in a target must carry a
+`:-fallback`.**
+
+**2. The Juemuren debounce does NOT cherry-pick.** `git cherry-pick` conflicts in
+`src/watch.rs`: the fork is based on a dotter that used `TaggedFilterer`, while upstream has
+since migrated to `GlobsetFilterer` (watchexec 8). The conflict is entirely in the filter
+construction, not the debounce.
+
+The debounce logic itself is **12 lines** and transplants by hand:
+
+```rust
+let last_deploy = Arc::new(Mutex::new(Instant::now() - Duration::from_secs(10)));
+let debounce_duration = Duration::from_millis(500);
+// ...inside on_action, before deploying:
+let mut last = last_deploy.lock().unwrap();
+let now = Instant::now();
+if now.duration_since(*last) < debounce_duration { return action; }
+*last = now;
+drop(last);
+```
+
+**Re-implement, do not cherry-pick.**
+
+**3. That commit also contained glob fixes that may still be live bugs upstream.** Juemuren
+changed `{}/` → `{}/**`, `.git/` → `.git/**`, and added
+`.replace('\\', "/")` for Windows paths. Current `src/watch.rs` still has:
+
+```rust
+(format!("!{}/", opt.cache_directory.display()), None),
+("!.git/".to_string(), None),
+```
+
+On Windows `cache_directory.display()` yields `.dotter\cache`, which cannot match a glob
+written with `/`. **Hypothesis: the watch filter fails to exclude the cache on Windows,
+which is a plausible root cause of #196's infinite loop — possibly more so than the missing
+debounce.** Unverified: requires a Windows box. If true, the fix is smaller *and* more
+correct than a debounce, and makes a better PR.
+
+### New finding: target collisions are not caught at config time
+
+Two packages may declare **different sources with the same target**. This is *not* a config
+error — it surfaces at deploy time, non-deterministically ordered:
+
+```
+[ERROR] Creating symlink "src/f2" -> "~/same" but target already exists
+        and doesn't point at source. Skipping.
+```
+
+First writer wins (BTreeMap order, i.e. alphabetical by package), second is skipped. Since
+composition is now the whole model, and composition means combining packages, **this is the
+model's main footgun.** A `validate`/`doctor` check for duplicate targets would be cheap and
+genuinely useful — note it as a candidate, since the golden test corpus (Phase 0b) can
+assert it.
+
+### Still unverifiable here
+
+No Windows machine and no container runtime on this host:
+
+- whether `fs::read_link` succeeds on an NTFS junction
+- whether hard links and junctions are truly privilege-free in practice
+- the Windows glob hypothesis above
+- `install.ps1` is unlinted (no `pwsh`)
+- the `pacman`/`apt`/`dnf` branches of `install.sh` are unexercised
+
+These need a real Windows box or a CI runner. **Do not write them up as verified.**
 
 ## Cherry-picks from forks and open PRs
 

@@ -33,10 +33,22 @@ A `validate` subcommand risks rejection as redundant with `--dry-run`. A golden-
 is pure addition, zero risk, and is the backwards-compatibility proof every later phase
 depends on.
 
-`[ ]` **Probe PR:** cherry-pick `Juemuren/dotter`'s watch debounce (+21/-3, `src/watch.rs`
-only), closing open issue **#196**. Not our code, near-zero cost, and it measures the one
-unknown that shapes everything: does the maintainer merge a small obviously-correct fix,
-and how fast?
+`[ ]` **Probe PR — #196 watch recursion.** Verified: the Juemuren commit **does not
+cherry-pick** (his fork predates upstream's `TaggedFilterer` → `GlobsetFilterer` migration;
+the conflict is entirely in filter construction). Re-implement the 12-line debounce by hand
+instead — snippet is in `docs/DESIGN.md` → *Recon log*.
+
+`[ ]` **First, test the better hypothesis.** That same commit also fixed globs
+(`{}/` → `{}/**`, `.git/` → `.git/**`, and `.replace('\\', "/")` for Windows paths).
+Current `src/watch.rs` still builds `format!("!{}/", opt.cache_directory.display())`, which
+on Windows yields `.dotter\cache` and cannot match a `/`-written glob. **If the cache is
+simply not being excluded on Windows, that is the real cause of #196** — a smaller, more
+correct fix than a debounce, and a better PR. Needs a Windows box to confirm.
+
+`[ ]` Add a duplicate-**target** assertion to the corpus. Verified footgun: two packages
+with different sources and the same target is *not* a config error — it fails at deploy
+time, first-writer-wins by alphabetical package order. This is composition's main sharp
+edge.
 
 ---
 
@@ -51,7 +63,9 @@ exactly where Developer Mode is locked down.
 `filesystem::symlinks_enabled` is false. Both are privilege-free; a hard link shares an
 inode, so round-trip is preserved.
 
-`[ ]` **Teach dotter to recognise its own hard links.** Verified problem, not speculation:
+`[ ]` **Teach dotter to recognise its own hard links.** Verified **empirically**, not just
+from the code: deployed a symlink, replaced the target with a hard link to the same source
+(same inode), redeployed → `target already exists and isn't a symlink. Skipping.`
 `get_file_state` (`filesystem.rs:696`) detects links via `fs::read_link`, which **fails on a
 hard link**. The target then reads as `FileState::File(..)` and `compare_symlink`
 (`filesystem.rs:737`) falls to `_ => SymlinkComparison::TargetNotSymlink` — dotter treats
@@ -84,15 +98,24 @@ Must land **before** Phases 4/5, or their cost estimate is wrong.
 `[ ]` Cherry-pick upstream PR **#190** (`balthild:master`, +106/-13, `src/config.rs`) into
 the fork. Open and unreviewed since 2024-11-06.
 
-Lets a destination stay next to its source while varying per machine:
+**Verified**: merges cleanly onto current `origin/master`, builds, and works — one variable
+in a machine file retargeted both managed files.
+
+Syntax is shell-style `${...}`, **not** handlebars `{{ ... }}` (it uses
+`shellexpand::env_with_context_no_errors`). A handlebars-style name is taken literally and
+creates a directory of that name.
 
 ```toml
-"nvim" = "{{ config_dir }}/nvim"          # global.toml
+"nvim" = "${config_dir}/nvim"              # global.toml
 ```
 ```toml
 [variables]                                # .dotter/machines/win-work.toml
 config_dir = "${APPDATA:-/nonexistent}"
 ```
+
+Measured precedence: config variable > environment variable; `:-fallback` works; a name
+defined **nowhere** is a hard error that aborts config loading — so every env var in a
+target needs a `:-fallback`.
 
 One variable per machine replaces N per-file overrides. **Do not re-open this upstream** —
 duplicating a rotting PR is worse than nothing. If it ever merges, drop the cherry-pick.
