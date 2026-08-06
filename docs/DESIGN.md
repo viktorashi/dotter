@@ -1,11 +1,19 @@
 # Dotter fork: design
 
-Goal: a dotfile manager where (a) one source file can go to different places per
-machine, and (b) when an app rewrites its own config in place, that edit finds its
-way back into the right template branch instead of being lost or silently clobbered.
+Goal: a dotfile manager where (a) one source can declare **all** its destinations in one
+place, next to that source, and (b) when an app rewrites its own config in place, that edit
+finds its way home instead of being lost or clobbered.
 
 Everything here is additive. Existing `global.toml` / `local.toml` must keep working
 unchanged.
+
+**Companion files** — read all three before starting work:
+
+| file | contents |
+|---|---|
+| `AGENTS.md` | project vision, working rules, the upstream maintainer's behaviour |
+| `docs/todo.md` | the ordered, gated work items |
+| this file | why each decision was made, and what was rejected |
 
 ## The problem, stated precisely
 
@@ -238,7 +246,7 @@ does not attempt it:
 > annotated with it. The human presses the button.
 
 No template inversion, no invertibility risk, roughly a third of the code. Automatic
-write-back is **Phase 3b**, gated on the hint proving reliable in practice.
+write-back is deferred (see `docs/todo.md` Phase 5), gated on the hint proving reliable in practice.
 
 ### The constraint this requires
 
@@ -255,128 +263,137 @@ may still use env expansion — `${APPDATA:-/nonexistent}` already works today.
 A content template that genuinely needs live env opts out of classification and always
 routes to manual conflict. Acceptable degradation.
 
-## Machines are entities, not variants
+## Two orthogonal mechanisms (they do not compete)
 
-An earlier draft here proposed a machine table with `inherits`, then replaced it with
-`[settings.variants]` — enumerated axes (`distro`, `wsl`, `gaming`) branched on with
-`{{#if}}` inside shared files.
+Earlier drafts here swung between a machine table with `inherits`, then
+`[settings.variants]` axes branched on with `{{#if}}`, then composition-replaces-everything.
+All three were confused, because they conflated two genuinely separate questions:
 
-**Both were wrong, and the second was wrong in an expensive way.** Variants push every
-difference *into* the file as a conditional, which is what forces content templating, which
-is what creates the entire reverse-sync problem this document spends most of its length
-solving. The right model is the one dotter already implements: a machine is its own entity,
-composed of layers it mostly shares with other machines.
+| question | mechanism | notes |
+|---|---|---|
+| **Where does this file go?** | **multi-target** (below) | co-located with the source, per the founding requirement |
+| **Which files exist here, and what is in them?** | **composition** — packages, includes, machine files | dotter already implements this |
 
-### Dotter already does this. Verified, today, zero new features
+They are complementary. Multi-target answers *destination*; composition answers *existence*
+and *content*. Neither subsumes the other, and the founding complaint — "I want to define
+where the files go in some file, for each file" — is answered only by multi-target.
+Expressing destinations as per-machine overrides scattered across machine files is exactly
+the split that was rejected as ugly at the outset.
 
-The composition chain in `merge_configuration_files`:
+### Composition: what dotter already does
+
+The chain in `merge_configuration_files`:
 
 ```
 global.toml packages          (must be DISJOINT — duplicate source key is a hard error,
                                config.rs:363)
   → local.includes[0..n]      (ordered override: package_global.files.extend(included),
                                config.rs:298-300)
-    → <hostname>.toml         (local.toml fallback by hostname, config.rs:159-171)
+    → the local config        (see "Machine selection" below)
       → local `[files]`       (final override: output.files.extend, config.rs:409)
 ```
 
-So **each machine is one tracked file named after its hostname**, listing the layers it
-composes, the packages it enables, and its own overrides:
+A machine is one **tracked** file under `.dotter/machines/<name>.toml`, listing the layers
+it composes, the packages it enables, and any overrides:
 
 ```toml
-# .dotter/desktop.toml           — tracked
+# .dotter/machines/desktop.toml          — tracked
 includes = [".dotter/layers/arch.toml"]
 packages = ["core", "gaming"]
-[files]
-"src/zshrc" = "~/.config/zsh/.zshrc-desktop"   # override just this one
-```
 
-```toml
-# .dotter/laptop.toml            — tracked
+# .dotter/machines/laptop.toml           — tracked
 includes = [".dotter/layers/arch.toml"]
 packages = ["core"]
 ```
 
-Verified end-to-end against a scratch `HOME`: both machines pick up the shared `arch` layer;
-desktop additionally deploys `gaming` and overrides one target; laptop deploys neither.
-`<hostname>.toml` is selected automatically with no flag.
+Verified end-to-end against a scratch `HOME`: both machines pick up the shared `arch`
+layer; desktop additionally deploys `gaming`; laptop does not.
 
-Drift is then trivial and needs no mechanism at all:
+Drift needs no new mechanism:
 
 | drift | how |
-| --- | --- |
+|---|---|
 | desktop gains a file laptop must not have | add a package, enable it in `desktop.toml` |
-| a target path differs on one machine | `[files]` override in that machine's file |
 | several machines share a change | put it in a layer they all include |
 | WSL needs interop files native Arch must not | a `wsl.toml` layer, included only by the WSL machine |
+| a shared file's *contents* differ | a variable, or an app-native `include` directive |
 
-### The decisive argument: this makes the hard problem disappear
+### Machine selection: the `machine` pointer
 
-Every file deployed this way is a **symlink**. The target *is* the repo file. When an app
-rewrites its own config, the change is already in the repo — verified: appending to the
-deployed file changed the source.
+**Hostname selection is rejected.** A Windows host and its WSL guest report the same
+hostname, so `<hostname>.toml` (`config.rs:159-171`) cannot distinguish them. Setting the
+WSL hostname via `/etc/wsl.conf` is circular — that file is itself deployed by dotter, so it
+requires the config that requires the hostname.
 
-Reverse-sync, classification, three-way merge, rerere — **all of it exists only for
-templated files**. Composition does not template, so for everything it covers, the problem
-is not solved but *absent*. Minimising templating beats improving reverse-sync.
+Instead, `local.toml` becomes a **single generated line**, written by the picker, never by
+hand:
 
-### Where composition genuinely fails
+```toml
+# .dotter/local.toml    — gitignored, generated by `dotter init-machine`
+machine = "desktop-wsl"
+```
 
-Grill it honestly. Composition is file-granular, so it cannot express *intra-file*
-variation. If `.zshrc` is 200 lines and 3 differ between machines, the options are:
+`LocalConfig` gains `machine: Option<String>`, resolved by loading
+`.dotter/machines/<name>.toml` as the local config and layering anything in `local.toml`
+on top. Machine files may not themselves set `machine` (no chaining).
 
-1. **Duplicate the file per machine** — 200 lines copied N times. This is real drift, worse
-   than anything it replaces. Never do this.
-2. **Split into fragments + the app's own include mechanism** — `source ~/.zshrc.local`,
-   git `[include]`, ssh `Include`, tmux `source-file`, nvim `require`, kitty `include`.
-   The app composes; dotter only symlinks fragments; everything stays a symlink.
-3. **Template it** — and accept the whole reverse-sync apparatus for that file.
+> **Guard against silent failure.** `packages` must be defaulted for a one-line
+> `local.toml` to parse — but then a *malformed* local config stops erroring and silently
+> deploys nothing. Rule: **exactly one of `machine` or `packages` must be present**; error
+> otherwise. A loud failure must not become a quiet one.
 
-Option 2 covers most real configs, because most config formats grew an include directive
-precisely for this. **Option 3 is the residual set: single-file formats with no include
-mechanism that also need intra-file variation.**
+### Why this matters beyond ergonomics
 
-`settings.variants` therefore survives, demoted: it exists **only to enumerate branch
-values for classification of that residual set**. If the residual set is empty, variants
-never need to be declared and classification never runs.
+Every file deployed by composition without templating is a **symlink** — the target *is*
+the repo file, so an app rewriting its own config lands the change in the repo for free.
+Verified: appending to a deployed file changed the source.
 
-The order to apply, in order:
+Reverse-sync, classification, three-way merge and rerere exist **only** for templated files.
+So the doctrine is:
 
 > **layer → app-native include → template.** Stop at the first that works.
 
-### Two real constraints found in the source
+Duplicating a 200-line file per machine to avoid a template is not composition, it is drift.
+Most config formats grew an include directive (`source`, git `[include]`, ssh `Include`,
+tmux `source-file`, nvim `require`, kitty `include`) precisely for this. Templating is the
+residual set: single-file formats with no include mechanism that still need intra-file
+variation.
 
-**1. `includes` cannot supply `packages`.** `IncludedConfig = BTreeMap<String, Package>`
-(`config.rs:135`) — an include patches packages, it cannot select them. And `packages` has
-no `#[serde(default)]` (`config.rs:142`), so it is mandatory. Verified: a `local.toml`
-containing only `includes = [".dotter/desktop.toml"]` fails with ``missing field `packages` ``.
-
-So the machine file must *be* the local config — reached by the `<hostname>.toml` fallback
-or by `-l`. It cannot be a one-line pointer.
-
-**2. Hostname collisions break the fallback.** A Windows box and its WSL guest report the
-same hostname by default, yet need different machine files.
-
-Fixes, cheapest first:
-
-- Set the WSL hostname in `/etc/wsl.conf` (`[network]\nhostname = desktop-wsl`) — and that
-  file is itself a dotfile deployed by dotter. Zero code.
-- `dotter -l .dotter/machines/desktop-wsl.toml`, via an alias or `DOTTER_LOCAL_CONFIG`.
-- Only if both fail: give `packages` a `serde(default)` and let an include carry it, making
-  a one-line `local.toml` pointer legal. ~10 lines — and a far better minimal upstream
-  feature than `settings.variants` ever was.
+**This argument has a hard dependency on symlinks actually being available — see
+"Windows linking" below, where it currently fails.**
 
 ## Multi-target
+
+**This is the founding requirement.** The original problem statement was: *"I want to
+define where the files go in some file (probably TOML) for each file"* — all destinations
+for a source, co-located with that source. Nothing else in this document replaces it.
 
 `FileTarget` is already an untagged serde enum (`config.rs:48-55`), so adding a variant is
 **fully backwards compatible** — every config that parses today still parses.
 
 ```toml
-"vscode/settings.json" = [
-  { target = "~/.config/Code/User/settings.json",   if = "dotter.linux" },
-  { target = "${APPDATA:-/nonexistent}/Code/User/settings.json", if = "dotter.windows" },
+"nvim" = [
+  { target = "~/.config/nvim",                     if = "(eq distro \"arch\")" },
+  { target = "${LOCALAPPDATA:-/nonexistent}/nvim", if = "dotter.windows" },
 ]
 ```
+
+One feature, two jobs, decided by how many conditions hold:
+
+- **exactly one true** → a per-machine destination. This is the `nvim` / `vscode` case, and
+  the reason this project exists.
+- **more than one true** → genuinely simultaneous targets. This is #186's actual case
+  (`pwsh` → both `Documents\PowerShell` and `Documents\WindowsPowerShell`).
+
+Both fall out of the same implementation; neither needs special handling.
+
+> **The upstream expansion-before-`if` bug bites here.** `shellexpand::full` runs over every
+> target at `config.rs:186-198`, *before* `filter_files_condition` (`handlebars_helpers.rs:27`,
+> reached from `deploy.rs:42`). So `${LOCALAPPDATA}` in a Windows-only entry crashes config
+> loading on Linux even though the `if` would have dropped it. Verified. Until that is fixed
+> upstream, **every env var in a target must carry a `:-fallback`** — `${LOCALAPPDATA:-/nonexistent}`.
+> The default suppresses the lookup error (verified in `shellexpand-2.1.2/src/lib.rs:452-492`;
+> the split token is `:-`, not `:`).
 
 The diff engine is **already pair-keyed** — `deploy.rs:265-285` collapses to
 `BTreeSet<(PathBuf, PathBuf)>` before diffing. Only three declarations assume one-to-one:
@@ -397,6 +414,58 @@ crisp answers here is most of what gets it merged):
   individual entries carry their own `if` instead.
 - local.toml overriding a source key **replaces the entire array**, not element-wise.
   Predictable, and matches existing override semantics.
+
+## Windows linking: the fallback that does not exist
+
+**This invalidates the "everything is a symlink" argument on Windows, and it is currently
+unaddressed.**
+
+`deploy.rs:67-84`: if `filesystem::symlinks_enabled` returns false, dotter routes **every
+file** into `desired_templates` — not just templated ones. All of them become rendered
+copies:
+
+```
+No permission to create symbolic links.
+On Windows, in order to create symbolic links you need to enable Developer Mode.
+Proceeding by copying instead of symlinking.
+```
+
+Consequences on a Windows box without Developer Mode:
+
+- No file round-trips. An app rewriting its config is a drift event for **100% of files**,
+  not the residual templated set.
+- The reverse-sync machinery (Phases for `merge` and classification) becomes load-bearing
+  for everything, rather than a fallback.
+- Corporate machines are exactly where Developer Mode is locked down — i.e. the worst case
+  is the work laptop.
+
+### The fix: hard links and junctions
+
+Both are **privilege-free** on Windows, and a hard link shares an inode, so round-trip is
+preserved exactly as with a symlink:
+
+| source kind | mechanism | privilege |
+|---|---|---|
+| file | `CreateHardLink` | none |
+| directory | NTFS junction | none |
+
+Rotz already does this (`junction::create` for directories, hard links for files, selected
+by `link_type = "hard"`). Dotter has no such path — its only fallback is copying.
+
+Known limits, to be documented rather than hidden:
+
+- Hard links require **same volume**. Repo on `C:` and target on `C:` is the normal case;
+  a repo on `D:` targeting `C:` must fall back to copying.
+- A hard link is not a symlink: deleting the repo file does not break the target, it just
+  decrements the link count. `undeploy` must therefore delete by cache entry, which it
+  already does.
+- Junctions are directory-only and do not follow across volumes either.
+
+### Ordering
+
+This lands **before** any reverse-sync work. If Windows can link, the residual templated set
+stays small and Phases 2/3 stay optional. If it cannot, they become mandatory — so the
+cheap fix must be attempted first, or the whole cost estimate downstream is wrong.
 
 ## Bootstrap
 
@@ -564,29 +633,36 @@ Nobody ships a polyglot installer: bun uses `curl -fsSL https://bun.com/install`
 `rustup-init.exe`; starship, deno, uv and homebrew all have two entry points. That is
 strong evidence the second file is not the part worth optimising away.
 
-Answers "on a brand-new machine, which existing config do I fork from?" without
-hand-editing TOML.
+Answers "on a brand-new machine, which config am I?" without hand-editing anything.
 
-1. **Probe** hostname, OS, and distro — `/etc/os-release` `ID`/`VERSION_ID` on Linux,
-   `sw_vers` on macOS, build number on Windows.
-2. **Read** `settings.variants` from the freshly cloned `global.toml`.
-3. **Rank** candidates by similarity to the probe, preselecting the best match.
-4. **Present** one fzf-style filter-as-you-type list *per declared axis*, auto-detected
-   value preselected:
+1. **Probe** OS and distro — `/etc/os-release` `ID`/`VERSION_ID` on Linux, `sw_vers` on
+   macOS, build number on Windows. Hostname is *not* used for selection (it collides
+   between a Windows host and its WSL guest); it is only a ranking hint.
+2. **List** `.dotter/machines/*.toml` — the tracked machine entities.
+3. **Rank** by similarity to the probe, preselecting the best match.
+4. **Present** one fzf-style filter-as-you-type list:
 
 ```
-? distro  (type to filter)          ? wsl
-> arch    ← detected (linux/arch)   > false  ← detected
-  rhel                                true
-  macos
-  windows
+? which machine is this?  (type to filter)
+> desktop         core, gaming        ← best match (linux/arch)
+  laptop          core
+  desktop-wsl     core, wsl-interop
+  win-work        core, windows
+  ──────────────
+  (create a new machine)
 ```
 
-1. **Write `.dotter/local.toml` only** — the selected values and the `packages` to enable.
-   Untracked, per-machine. **Tracked config is never modified**, so a new machine needs no
-   commit.
-2. If the probe matches no declared value, offer to add one — that *is* a tracked change,
-   and it is the correct moment for one, because a genuinely new variant now exists.
+5. **Write one generated line** to gitignored `.dotter/local.toml`:
+
+```toml
+machine = "desktop"
+```
+
+   Nothing is hand-written, and tracked config is untouched — a new machine needs no commit
+   unless it is genuinely a *new* machine.
+6. **"create a new machine"** writes `.dotter/machines/<name>.toml` too — a tracked change,
+   and the correct moment for one, because a new entity now exists. Offer to seed it from
+   an existing machine's `includes`/`packages`.
 
 **Implementation: `inquire`.** Its default features are
 `["macros", "crossterm", "one-liners", "fuzzy"]` and it requires `crossterm ^0.29.0` —
@@ -646,6 +722,52 @@ interested in transferring maintenance."*
 So: fork first, get users, demo it. That converts the ask from "review my 600-line diff"
 to "your users are already running this" — the only lever that works on this maintainer.
 
-**Branch hygiene:** design docs and exploratory work live on `viktorashi`. Each upstream
-PR is cut on a **clean branch off `origin/master`**, containing only the code for that one
-phase — no `docs/`, no design notes, squashed.
+### Stacked PRs
+
+Work happens on the fork's `viktorashi` branch, which carries `docs/`, `bootstrap/`,
+`AGENTS.md` and exploratory commits. **None of that is ever pushed upstream.**
+
+Each upstream PR is cut fresh from `origin/master` and contains exactly one reviewable
+unit:
+
+```
+origin/master
+  └── up/00-tests          golden config fixtures            (pure addition, zero risk)
+       └── up/01-winlink   hard link + junction fallback     (bug fix, self-contained)
+            └── up/02-multitarget   FileTarget::Many + cache v1 migration
+                 └── up/03-machine  `machine` pointer field  (depends on nothing above)
+```
+
+Rules a fresh implementer must follow:
+
+1. **One concern per PR.** Never mix a refactor with a feature. The maintainer merges
+   small, obviously-correct changes same-day and ignores large ones for 15 months —
+   optimise for the first bucket.
+2. **Cut from `origin/master`, not from the previous PR branch**, unless there is a genuine
+   code dependency. Independent PRs review and merge in parallel; a chain blocks on the
+   slowest link.
+3. **No `docs/`, no `TODO.md`, no `AGENTS.md`, no `bootstrap/`** in any upstream branch.
+   Strip them; they are fork identity, not upstream value.
+4. **Every PR closes or references an existing issue** where one exists — #196 (watch
+   recursion), #186 (multi-target), #193 (merge tool), #51 (reverse sync). An unrequested
+   feature is a much harder sell than an answer to a filed request.
+5. **Answer the maintainer's stated objection in the PR body.** For #186 he named two
+   blockers (TOML forbids duplicate keys; `target = ""`-disable and local-override
+   semantics must keep working). A PR that pre-empts both reads as considerate; one that
+   ignores them reads as work for him.
+6. **Squash before opening.** One commit, imperative subject, body explaining *why*.
+7. **Never break `cache.toml` without a version + migration.** It is generated, so
+   migration is cheap and its absence is an instant rejection.
+8. **Do not open more than two PRs at once.** A queue reads as a burden; two reads as
+   contribution.
+
+### What is fork-only, permanently
+
+- `bootstrap/install.sh`, `install.ps1`, `router.js` — a `curl | sh` installer is a
+  project-identity decision belonging to the maintainer, not a contributor.
+- `dotter init-machine` — depends on the `machine` field landing first, and on a
+  `.dotter/machines/` convention upstream has not adopted.
+- `docs/`, `TODO.md`, `AGENTS.md`.
+
+Classification (`docs/todo.md` Phase 5) is deliberately unscheduled for upstreaming: it closes #51, which
+the maintainer personally abandoned, and only a working demo will move him.

@@ -1,61 +1,145 @@
-## Phases
+# TODO
 
-Each phase is an independently PR-shaped unit.
+Ordered. Each entry is an independently reviewable unit. See `docs/DESIGN.md` for the
+reasoning behind every one of these — **do not start an item without reading its section
+there.**
 
-### Phase 0a — port the dotfiles with composition only, zero templates
+Status legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` dropped
 
-Before any code: express all machines as `<hostname>.toml` + shared layers, using only
-what ships today. Then measure how many files actually need *intra-file* variation that no
-app-native include can absorb.
+---
 
-That number decides whether Phases 2 and 3 are worth building at all. If it is zero, the
-reverse-sync machinery has no users and should not exist.
+## Phase 0a — port the dotfiles using only what ships today
 
-### Phase 0 — golden config test corpus
+`[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
+composition only, **zero content templates**. Select with `-l` for now (the `machine`
+pointer does not exist yet).
 
-**Verified: dotter has no `tests/` directory and 19 unit tests total.** `--dry-run` only
+`[ ]` Count the files that genuinely need *intra-file* variation which no app-native
+`include` directive can absorb.
+
+**This number gates Phases 4 and 5.** If it is zero, the reverse-sync machinery has no
+users and must not be built. Nothing downstream is justified until this is measured.
+
+---
+
+## Phase 0b — golden config test corpus  → upstream `up/00-tests`
+
+`[ ]` Add `tests/` with fixture configs asserting merged output.
+
+Verified: dotter has **no `tests/` directory** and 19 unit tests total. `--dry-run` only
 bumps verbosity (`args.rs:123`); there is no validate-only path.
 
-A `validate` subcommand risks rejection as redundant with `--dry-run`. A **golden-file
-config test corpus** — parse fixture configs, assert the merged output — is pure
-addition, zero risk to existing behaviour, and is the backwards-compatibility proof every
-later phase depends on. Maintainers merge test PRs.
+A `validate` subcommand risks rejection as redundant with `--dry-run`. A golden-file corpus
+is pure addition, zero risk, and is the backwards-compatibility proof every later phase
+depends on.
 
-Secondary probe: cherry-pick `Juemuren/dotter`'s watch debounce (+21/-3, `src/watch.rs`
-only), which closes open issue **#196** (watch + post-deploy hook infinite recursion).
-Not our code, near-zero cost, and it measures the single most important unknown: does the
-maintainer merge a small obviously-correct fix, and how fast?
+`[ ]` **Probe PR:** cherry-pick `Juemuren/dotter`'s watch debounce (+21/-3, `src/watch.rs`
+only), closing open issue **#196**. Not our code, near-zero cost, and it measures the one
+unknown that shapes everything: does the maintainer merge a small obviously-correct fix,
+and how fast?
 
-### Phase 1 — multi-target
+---
 
-`FileTarget::Many`, cache versioning + migration, the two semantics above. Closes **#186**.
-Port the real dotfiles to it — that is the demo.
+## Phase 1 — Windows hard link + junction fallback  → upstream `up/01-winlink`
 
-### Phase 1b — `dotter init-machine` + bootstrap scripts
+`[ ]` When `symlinks_enabled` is false, use hard links for files and NTFS junctions for
+directories instead of copying.
 
-`inquire`-based variant picker, plus the two installer scripts (already drafted in
-`bootstrap/`). Depends on declared variants existing, but not on classification, so it can
-land before Phase 3.
+**Highest-value item in the plan.** `deploy.rs:67-84` currently converts *every* file to a
+rendered copy when symlinks are unavailable — so on a Windows box without Developer Mode,
+nothing round-trips and the reverse-sync problem applies to 100% of files. Both hard links
+and junctions are privilege-free, and a hard link shares an inode, preserving round-trip.
 
-**Stays in the fork, not upstreamed.** The bootstrap scripts assume `settings.variants`
-and `dotter setup-git`, neither of which exists upstream; and a `curl | sh` installer is a
-project-identity decision that belongs to the maintainer, not a contributor.
+`[ ]` Document the limits honestly: same-volume requirement; junctions are directory-only;
+fall back to copying when neither is possible.
 
-### Phase 2 — `dotter merge` + `dotter setup-git`
+Must land **before** Phases 4/5, or their cost estimate is wrong.
 
-Implements **#193**. On `TemplateComparison::Changed`, emit the 3-way (base =
-`.dotter/cache/`, ours = live target, theirs = fresh render) and shell out to `merge.tool`.
-~120 lines, two separate PRs. SuperCuber said in #51 he is *"open to implementing this as
-a flag"*.
+---
 
-### Phase 3 — declared machines + branch classification
+## Phase 2 — multi-target  → upstream `up/02-multitarget`
 
-The research. Build in the fork, prove on real dotfiles, **do not PR until demoed**.
-Closes **#51**, which the maintainer personally gave up on — which is exactly why a
-working demo is worth more than a design doc.
+`[ ]` `FileTarget::Many`, closing **#186**.
 
-### Phase 4 — demo repo
+**The founding requirement.** All destinations for a source, co-located with that source.
 
-Real dotfiles, four machines, showing: one source → multiple per-machine targets; an app
-rewriting its own config; the edit landing in the correct template branch; rerere making
-it silent the second time.
+`[ ]` `cache.toml` `version` field + migration on read (currently source-keyed).
+
+`[ ]` Pin the semantics the maintainer named as blockers:
+  - whole-value `""` disables everything; individual entries carry their own `if`
+  - local override **replaces the entire array**, not element-wise
+
+`[ ]` Touch points: `Files` (`config.rs:74`), `Cache` (`config.rs:210`),
+`desired_symlinks` (`deploy.rs:80`), and `.remove(source)` at `deploy.rs:293,305,325,347`
+must become target-aware. The diff engine is already pair-keyed (`deploy.rs:265-285`).
+
+---
+
+## Phase 3 — machine selection  → upstream `up/03-machine`, then fork-only
+
+`[ ]` `LocalConfig.machine: Option<String>` resolving `.dotter/machines/<name>.toml`.
+Machine files may not chain.
+
+`[ ]` **Guard:** exactly one of `machine` or `packages` must be present. Defaulting
+`packages` without this turns a loud parse failure into a silent deploy-nothing.
+
+`[ ]` `dotter init-machine` — `inquire` fzf-style picker listing `.dotter/machines/*.toml`,
+writing the single generated line to gitignored `local.toml`. **Fork-only.**
+
+`inquire = "0.9"` — defaults are `["macros","crossterm","one-liners","fuzzy"]` and it
+requires `crossterm ^0.29.0`, which dotter already pins. No second terminal backend.
+
+`[ ]` Bootstrap scripts (`bootstrap/install.sh`, `install.ps1`, `router.js`) — already
+drafted, need the picker to exist. **Fork-only, permanently.**
+
+---
+
+## Phase 4 — `dotter merge` + `dotter setup-git`  → gated on Phase 0a
+
+`[ ]` On `TemplateComparison::Changed`, emit the 3-way (base = `.dotter/cache/`,
+ours = live target, theirs = fresh render) and shell out to `merge.tool`. Implements
+**#193**; SuperCuber said in #51 he is *"open to implementing this as a flag"*.
+
+`[ ]` `dotter setup-git` — `rerere.enabled`, `merge.conflictStyle diff3`, the mergiraf
+driver, `.gitattributes`. Shell out to real git: libgit2 has neither custom merge drivers
+nor rerere.
+
+`[ ]` `dotter doctor` — git, mergiraf, rerere, driver, machine, cache validity.
+
+Two separate PRs. **Do not start if Phase 0a's number is zero.**
+
+---
+
+## Phase 5 — branch classification  → gated on Phase 0a, demo before PR
+
+`[ ]` Classification as N−1 three-way merges against the other variants' renders.
+Verified: clean merge → generic; conflict → machine-specific.
+
+`[ ]` Known failure mode to handle: an addition adjacent to a divergent line yields a false
+conflict. Verified that **mergiraf does not rescue this**. Safe direction — over-reports
+machine-specific, never silently misfiles.
+
+`[ ]` Write-back stays **manual in v1**: show the classification as a hint, human decides.
+
+Closes **#51**, which the maintainer personally abandoned. **Do not PR until demoed.**
+
+---
+
+## Phase 6 — demo repo
+
+`[ ]` Real dotfiles, multiple machines: one source → multiple targets; an app rewriting its
+own config; the edit landing in the right place; rerere making it silent the second time.
+
+---
+
+## Unscheduled
+
+`[ ]` File the two upstream issues: the expansion-before-`if` ordering bug (unreported,
+verified), and the `${VAR:fallback}` vs `${VAR:-fallback}` doc error from #86.
+
+`[ ]` Decide the fate of `.dotfiles/` — it is the abandoned hook-based `link.sh` design and
+contradicts everything current. Deferred until the plan is settled.
+
+`[ ]` Backlog: share `rerere` resolutions across machines by symlinking `.git/rr-cache` into
+the dotfiles repo. Verified working. Only matters if Phase 0a's number is non-zero.
+Caveat: rr-cache stores conflict pre/post images — fragments of the conflicting files.
