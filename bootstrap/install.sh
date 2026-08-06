@@ -204,10 +204,12 @@ install_mergiraf
 clone_repo
 
 cd "$DOTFILES"
-say "selecting machine profile"
-dotter init-machine || \  # fzf-style picker; writes local.toml, may extend global.toml
-dotter setup-git || \     # rerere + mergiraf merge driver + .gitattributes
-dotter deploy
+
+# Guarded, and deliberately NOT piped: init-machine is an interactive picker and
+# needs a TTY on stdout. `set -e` would abort anyway; these give a legible reason.
+dotter init-machine || die "machine selection cancelled or failed"
+dotter setup-git    || die "git setup failed (rerere / merge driver / .gitattributes)"
+dotter deploy       || die "deploy failed — re-run with: cd $DOTFILES && dotter deploy -v"
 
 say "done"
 [ "${PATH_WARN:-0}" = 1 ] && warn "add $BIN to your PATH"
