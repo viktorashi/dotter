@@ -15,6 +15,153 @@ unchanged.
 | `docs/todo.md` | the ordered, gated work items |
 | this file | why each decision was made, and what was rejected |
 
+## In one page
+
+Start here. Everything below this section is the detail behind it.
+
+### What is broken today
+
+Your dotfiles live in a bare git repo whose work-tree **is** `$HOME`, so a file's
+destination is fixed by where it sits in the repo. The only way to make a machine different
+is to give it its own **branch**. You have five. Each one is permanently checked out
+somewhere, so every machine quietly drifts from the others.
+
+Measured, not assumed: between `arch-wsl` and `windows10` there are **1478 changed lines and
+only ~11 are genuinely OS-specific.** ~98% of the difference is accidental. That is the
+disease. Branches are the cause.
+
+```plantuml
+@startuml
+skinparam defaultTextAlignment center
+rectangle "today" {
+  [main] as M
+  [arch-wsl] as A
+  [leanoox] as L
+  [mac] as C
+  [windows10] as W
+  M -[#gray,dashed]-> A : diverges
+  M -[#gray,dashed]-> L
+  M -[#gray,dashed]-> C
+  M -[#gray,dashed]-> W
+  note bottom of W
+    5 branches, 5 drifting copies.
+    "main" is behind all of them.
+  end note
+}
+rectangle "after" {
+  [one tree] as T
+  [machine: arch-wsl] as MA
+  [machine: leanoox] as ML
+  [machine: mac] as MC
+  [machine: win10] as MW
+  T --> MA
+  T --> ML
+  T --> MC
+  T --> MW
+  note bottom of MW
+    one branch. Each machine is a
+    named set of packages, and every
+    difference is one small file.
+  end note
+}
+@enduml
+```
+
+### The replacement, in three ideas
+
+1. **A machine is an entity that composes packages.** `nvim`, `zsh`, `certs`, `work-proxy`.
+   A machine file lists the packages it wants. Two machines that want the same things cost
+   nothing extra. A difference shows up as *one small file*, not a diverged branch.
+2. **A file goes to exactly one place per machine.** Different places on different machines,
+   never two places at once. This is why the multi-target feature was dropped: you never
+   needed it.
+3. **Prefer a link over a rendered copy.** A symlink round-trips for free — edit the
+   deployed file, the repo file changed, because they are the same file. A rendered template
+   does not round-trip, and that is where every hard problem in this project comes from.
+
+### The repo, after the port
+
+```plantuml
+@startuml
+skinparam defaultTextAlignment left
+folder "~/.dotfiles" {
+  folder "files/" as F {
+    card "everything that gets **placed** somewhere\ne.g. files/nvim/, files/zshrc, files/bin/wt" as FC
+  }
+  folder "scripts/<package>/" as S {
+    card "everything that gets **run** on deploy\ne.g. scripts/certs/10-install.sh" as SC
+  }
+  folder ".dotter/" as D {
+    card "global.toml   = packages -> destinations\nmachines/*.toml = which packages this box wants\nlocal.toml    = one line: machine = \"leanoox\" (gitignored)" as DC
+  }
+  card "justfile\nrecipes you run by hand, on the repo itself" as J
+}
+@enduml
+```
+
+Two roots, split by **role**, so nobody can mistake a script for something that forgot its
+symlink. Neither root is self-policing on its own, so `dotter doctor` asserts the
+convention: everything under `files/` is claimed by some package; nothing under `scripts/`
+is; every `scripts/<name>/` is a real package.
+
+### Where the work is
+
+Almost all of it is **config, not code**. The tool changes are small, and each one exists
+because a specific thing was measured to be broken:
+
+| what | why it exists |
+|---|---|
+| **Phase 0a** port the dotfiles | the actual goal. Reconcile the 98% drift *first*, as its own commit, before any dotter config exists |
+| **0b** `up/watch-filter` | `dotter watch` infinitely re-deploys; root-caused to globs passed as `filters` instead of `ignores` |
+| **0c** `up/self-overwrite-guard` | verified **data loss**: a template inside a whole-directory symlink resolves back onto its own source, and `--force` deletes it |
+| **1** `up/windows-link-fallback` | on a corporate Windows box symlinks need Administrator; hard links and junctions do not. Verified on the real box |
+| **2** cherry-pick PR #190 | variables in target paths, sitting unreviewed upstream since 2024 |
+| **3** `up/machine-field` | the `machine = "..."` pointer + an interactive picker, so a fresh box needs no hand-editing |
+| **4** `dotter merge` / `doctor` | the round-trip problem: an app rewrote a *rendered* file and the edit must find its way home |
+| **5** branch classification | the one-time migration: tell drift apart from real divergence |
+
+### The one honest constraint
+
+*"NOTHING leaves the repo without a breadcrumb back to the source. Guaranteed. No
+edge-cases."* That rule is what decides the hard calls, and it has already overturned one
+decision (directories link whole rather than expanding, because expansion silently drops the
+files an app writes). Where a rule and a convenience disagree, the rule wins.
+
+### Upstream vs fork
+
+The fork is `viktorashi/dotter`, branch `viktorashi`. **`src/` is currently byte-identical to
+upstream.** Every fix that is genuinely upstream's bug gets its own branch cut fresh from
+`origin/master` carrying one concern — never a PR from `viktorashi`, which also holds
+`docs/`, `bootstrap/` and `AGENTS.md` that upstream must never see.
+
+```plantuml
+@startuml
+skinparam defaultTextAlignment center
+[origin/master] as OM
+[up/config-tests] as B1
+[up/watch-filter] as B2
+[up/self-overwrite-guard] as B3
+[up/windows-link-fallback] as B4
+[up/machine-field] as B5
+[viktorashi] as VK
+OM --> B1
+OM --> B2
+OM --> B3
+OM --> B4
+OM --> B5
+OM --> VK
+note right of VK
+  fork-only, never upstreamed:
+  docs/, bootstrap/, AGENTS.md,
+  cherry-picked PR #190
+end note
+note bottom of B3
+  cut independently -> they review
+  and merge in parallel, not in a queue
+end note
+@enduml
+```
+
 ## The problem, stated precisely
 
 Two regimes:
