@@ -1382,7 +1382,7 @@ forgotten — which is exactly what happened to `docs/Makefile`, and why
 `generate-readme.sh` exists as a second copy of it. Keep the justfile; it is thin on
 purpose.
 
-### Secrets — no story at all
+### Secrets — deferred, not designed
 
 `.ssh/config` is tracked, and on a **public** repo it currently carries internal corporate
 hostnames and account names (`stratec-db14.intern.stratec.com`, `User rvsclient`,
@@ -1390,10 +1390,15 @@ hostnames and account names (`stratec-db14.intern.stratec.com`, `User rvsclient`
 foot-gun). This is not merely an undesigned feature — it is a live exposure, and it is also
 the single most machine-bound file in the corpus.
 
-Options, none chosen: a second private repo as an extra layer; a gitignored
+Decided: **support for secrets is wanted, but far down the queue.** Until it exists, the
+holding pattern is to keep the offending file out of the repo by hand.
+
+Options for later, none chosen: a second private repo as an extra layer; a gitignored
 `files-local/` root; or in-repo encryption (`age`/`sops`, as chezmoi does). Note the
 constraint that any answer must survive bootstrap on a bare machine, which is exactly what
-makes encryption awkward (the key has to arrive first).
+makes encryption awkward (the key has to arrive first) — and which makes the private-repo
+layer the cheapest of the three, since `bootstrap/` already clones one repo and would just
+clone a second.
 
 ### Undeploy does not undo `scripts/`
 
@@ -1402,22 +1407,58 @@ removed from a machine leaves its imperative effects behind. `pre_undeploy` exis
 dispatcher trick works there identically, but symmetric teardown is not designed and may
 not be worth it (most setup is not cleanly reversible).
 
-### Committed binaries
+### Committed binaries — deliberate, keep
 
-`auto-hotkey/compiled-hotkeys/autohotkeys.exe` is tracked. The repo is only 2.1 MB today so
-this is not urgent, but a compiled artifact in a config tree is a build output, and
-`filesystem::is_template` reads every source file looking for `{{`.
+`auto-hotkey/compiled-hotkeys/autohotkeys.exe` is tracked. **This is a decision, not an
+oversight**: the artifact changes rarely and committing it avoids requiring a compiler on
+every Windows machine just to get hotkeys back. The repo is 2.1 MB total, so the cost is
+nil. Revisit only if binaries start changing per-commit.
 
-### The `conf` command and the repo's own name
+### Resolved: `conf`, and the repo's own name
 
-Two loose ends around migration:
+- `conf` loses its bare-repo definition and becomes an ordinary `git -C ~/.dotfiles`
+  wrapper; the `conflazygit`-style aliases follow the same rewrite. No behaviour to design.
+- The repo is `github.com/viktorashi/dotfiles`; `my-config` is the old name and GitHub
+  redirects, so the stale clone URL in the old bootstrap script is harmless. Non-issue.
 
-- `conf` is muscle memory and is defined as `git --git-dir=$HOME/.cfg --work-tree=$HOME`.
-  After the port there is no bare repo, so it must be redefined or retired — deliberately,
-  not by accident.
-- The repo is `github.com/viktorashi/dotfiles`, but `backup-remove-and-clone.sh` clones
-  `viktorashi/my-config`. Which name survives, and whether the existing history is carried
-  over or the ported tree starts fresh, is undecided.
+### `dotter watch` re-runs every script on every save
+
+This is a collision between two decisions made separately, and it is the sharpest open
+problem in the imperative design.
+
+`dotter watch` redeploys on **every source edit**. The post-deploy dispatcher runs every
+script of every selected package on **every deploy**. Composed: editing one line of
+`.zshrc` re-runs `setup-certficates.sh` and `install-init-stuff.sh` — the latter installs
+packages. Idempotent is not the same as cheap, and "idempotent" was the only rule holding
+this together (*Idempotency is the script's job — for now*).
+
+This also interacts with **#196**, whose reproduction is precisely a post-deploy hook
+feeding the watcher.
+
+The deferred `run_onchange_` hashing is no longer a nicety — under `watch` it is closer to
+a prerequisite. The trigger recorded earlier (*"two scripts grow a hand-written marker
+guard"*) is superseded: **the real trigger is the first time `dotter watch` is used on a
+tree that has any `scripts/`.** Cheapest interim mitigation, if needed before then: run the
+dispatcher from `post_deploy` only when not under `watch`.
+
+### Verified: on Windows, `sh` is not on `PATH` and `bash` is a trap
+
+The dispatcher is POSIX `sh`, and dotter prefers a `.bat` sibling on Windows
+(`hooks.rs:16-27`), so `post_deploy.bat` must invoke `sh` somehow. Measured on this box:
+
+| probe | result |
+|---|---|
+| `Get-Command sh` | **not found** — Git for Windows is installed but only `Git\cmd\` is on `PATH` |
+| `Get-Command bash` | `C:\WINDOWS\system32\bash.exe` — **the WSL launcher, not Git Bash** |
+| `$env:LOCALAPPDATA\Programs\Git\bin\sh.exe` | exists, runs, `HOME=/c/Users/istan`, `uname -s` = `MINGW64_NT-10.0-26100` |
+
+So the naive `post_deploy.bat` containing `sh .dotter/hooks/…` fails outright, and the
+naive `bash …` repair is far worse: it would execute the **Windows** deploy hook **inside
+WSL**, against WSL's `$HOME` and filesystem, and appear to succeed.
+
+The `.bat` must therefore resolve `sh.exe` by absolute path, derived from `git` (which
+bootstrap guarantees): `where git` → `…\Git\cmd\git.exe` → `…\Git\bin\sh.exe`. Never call
+bare `bash`.
 
 ## Upstreaming strategy
 

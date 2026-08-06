@@ -85,12 +85,18 @@ LSP rosters are a snapshot artifact — whichever machine ran the script last wo
 by taking the union of what is actually wanted, commit that as an ordinary file, and leave
 it out of the review diff below.
 
-`[ ]` Decide the secrets story **before** the first push of the ported tree.
-`.ssh/config` currently carries internal corporate hostnames and account names on a public
-repo. Options and constraints in `docs/DESIGN.md` → *Gaps* → *Secrets*.
+`[ ]` Keep `.ssh/config` out of the ported tree by hand **before the first push** — it
+carries internal corporate hostnames on a public repo. Real secrets support is deferred
+(`docs/DESIGN.md` → *Gaps* → *Secrets*).
 
-`[ ]` Decide what `conf` becomes, and whether the ported tree keeps the existing history or
-starts fresh (and under which of the two repo names). Both in `docs/DESIGN.md` → *Gaps*.
+`[ ]` Rewrite `conf` and the `conflazygit`-style aliases as plain `git -C ~/.dotfiles`
+wrappers. No design needed.
+
+`[ ]` Write `.dotter/post_deploy.bat` to resolve `sh.exe` **by absolute path derived from
+`git`** — `where git` → `…\Git\cmd\git.exe` → `…\Git\bin\sh.exe`. Verified on the real
+box: bare `sh` is not on `PATH`, and bare `bash` is `C:\WINDOWS\system32\bash.exe`, the WSL
+launcher, which would run the Windows deploy hook inside Linux and appear to succeed. See
+`docs/DESIGN.md` → *Gaps*.
 
 `[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
 composition only, **zero content templates**. Select with `-l` for now (the `machine`
@@ -325,9 +331,24 @@ Cheap when wanted, because it belongs inside dotter rather than in shell: render
 already land in `.dotter/cache/`, and `filesystem::compare_template` already answers "did
 the rendered content change". No new state file, no `sha256sum`/`certutil` split.
 
-**Trigger to watch for:** two or more scripts growing a hand-written
-`[ -f ~/.marker ] && exit 0` guard. Until then the single rule "scripts must be idempotent"
-costs nothing.
+**Trigger to watch for:** ~~two or more scripts growing a hand-written marker guard~~ —
+**superseded.** The real trigger is the first use of `dotter watch` on a tree that has any
+`scripts/`, because watch redeploys on every source edit and the dispatcher re-runs every
+script of every selected package on every deploy. Editing one line of `.zshrc` would re-run
+`install-init-stuff.sh`. Idempotent is not the same as cheap. See `docs/DESIGN.md` →
+*Gaps* → *`dotter watch` re-runs every script on every save*. Interim mitigation if needed
+sooner: skip the dispatcher when running under `watch`.
+
+---
+## Deferred — secrets
+
+Wanted, explicitly low priority. `.ssh/config` is the live case (internal corporate
+hostnames on a public repo); the holding pattern until then is to keep it out of the repo
+by hand.
+
+Three options, unchosen, in `docs/DESIGN.md` → *Gaps* → *Secrets*. The private-repo layer
+is the cheapest because `bootstrap/` already clones one repo; in-repo encryption is the
+awkward one because the key must arrive before bootstrap can decrypt anything.
 
 ---
 
