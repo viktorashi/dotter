@@ -73,14 +73,24 @@ things you run yourself*. Concretely:
   - `no-exe-wrapper-scripts.sh` — generates two static 2-line wrappers. **Delete**; commit
     `files/bin/wt` and `files/bin/im` instead.
   - `generate-readme.sh` **and** `docs/Makefile` — the same `pandoc` line, twice. Both go;
-    one `just generate-readme` recipe replaces them.
-  - `backup-remove-and-clone.sh`, `startup-scripts/configupdatemason.sh` — the only two
-    genuine recipes. Move to a repo-root `justfile`.
+    one `just generate-readme` recipe replaces them. That is the **only** recipe left.
+  - `backup-remove-and-clone.sh` — **delete**. It is the current bootstrap and every line is
+    replaced (see `docs/DESIGN.md` → *Gaps*).
+  - `startup-scripts/configupdatemason.sh` — **delete**. It snapshots `ls
+    ~/.local/share/nvim/mason/packages`, which is the cause of the drift, not a fix for it.
+    Declare one shared roster as a plain file instead.
 
-`[ ]` **Do not hand-merge `mason.lua`.** It is *generated* by `configupdatemason.sh`, so its
-two divergent LSP rosters are a regeneration artifact — whichever machine ran the script
-last won. Reconcile by taking the union of what is actually wanted and re-running the
-recipe, and leave it out of the review diff below.
+`[ ]` **Do not hand-merge `mason.lua`.** It is *generated* (see above), so its two divergent
+LSP rosters are a snapshot artifact — whichever machine ran the script last won. Reconcile
+by taking the union of what is actually wanted, commit that as an ordinary file, and leave
+it out of the review diff below.
+
+`[ ]` Decide the secrets story **before** the first push of the ported tree.
+`.ssh/config` currently carries internal corporate hostnames and account names on a public
+repo. Options and constraints in `docs/DESIGN.md` → *Gaps* → *Secrets*.
+
+`[ ]` Decide what `conf` becomes, and whether the ported tree keeps the existing history or
+starts fresh (and under which of the two repo names). Both in `docs/DESIGN.md` → *Gaps*.
 
 `[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
 composition only, **zero content templates**. Select with `-l` for now (the `machine`
