@@ -115,6 +115,23 @@ branches are cut fresh from `origin/master` and contain **only** `src/` + `tests
 - That is the ideal starting point for the stacked-PR plan: every upstream branch can be cut
   from `origin/master` with no fork noise to strip.
 - Assumptions that have been tested against a running binary are recorded in
-  `docs/DESIGN.md` → *Recon log*. Anything not listed there is still an assumption —
-  in particular **everything Windows-specific is unverified**, because there is no Windows
-  box or container runtime on this host.
+  `docs/DESIGN.md` → *Recon log*. Anything not listed there is still an assumption.
+
+## Test environment available here
+
+This host is **WSL2 on Windows 11**, so a real Windows box is reachable — do not mark
+Windows behaviour "unverifiable".
+
+- `powershell.exe`, `cmd.exe` and `wslpath` work from the Linux side; `/mnt/c` is mounted.
+- **Windows has its own Rust toolchain** (cargo 1.97.1), so probes and dotter itself can be
+  built and run natively: copy sources under `/mnt/c/Users/<user>/AppData/Local/Temp/` and
+  invoke `cargo` through `powershell.exe`. A full release build takes ~8 minutes.
+- The box is **not administrator** and has **Developer Mode OFF** — the exact corporate
+  worst case, which makes it the ideal Phase 1 test target.
+- `docker` is installed but the **daemon is not reachable**, so the `pacman`/`apt`/`dnf`
+  branches of `bootstrap/install.sh` remain unexercised.
+- No `pwsh` (PowerShell 7) — `bootstrap/install.ps1` is still unlinted; Windows PowerShell
+  5.1 is what is present.
+
+**Clean up after Windows tests.** They write into the real `%USERPROFILE%`; one stray
+`deployed.txt` was created and removed during recon. Watch for `DOTTER_SYMLINK_TEST` too.
