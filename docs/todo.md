@@ -10,6 +10,22 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` dro
 
 ## Phase 0a — port the dotfiles using only what ships today
 
+**Input**: `github.com/viktorashi/dotfiles` (default branch `main`). **Not cloned on this
+host** — clone it first; nothing in this phase can start without it.
+
+The five branches are the machine entities to be collapsed into one tree:
+
+| branch | becomes |
+|---|---|
+| `main` | the shared base / layers |
+| `arch-wsl` | `.dotter/machines/arch-wsl.toml` |
+| `leanoox` | `.dotter/machines/leanoox.toml` |
+| `mac` | `.dotter/machines/mac.toml` |
+| `windows10` | `.dotter/machines/windows10.toml` |
+
+`[ ]` Clone the repo and diff the four machine branches against `main` — that diff *is* the
+per-machine divergence, and it is what the machine files must encode.
+
 `[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
 composition only, **zero content templates**. Select with `-l` for now (the `machine`
 pointer does not exist yet).
