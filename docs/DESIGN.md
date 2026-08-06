@@ -648,6 +648,18 @@ What is missing: hooks are **global**. There is no per-package hook, no per-mach
 no idempotency, no ordering. The obvious failure mode is a single `post_deploy.sh` growing
 into a 300-line `case`/`if` — which is the drift problem again, relocated into shell.
 
+### `scripts/` **is** the hook — it is not an alternative to one
+
+Stated plainly, because the layout hides it: `.dotter/post_deploy.sh` is the *only* thing
+dotter runs. It is a **dispatcher**, and `scripts/<package>/*.sh` are the files it invokes.
+There is no second mechanism.
+
+The reason it is not simply one `post_deploy.sh` is that dotter's four hooks are **global** —
+they have no idea which packages this machine selected. Putting the logic directly in the
+hook means a growing `if` per machine, which is the drift problem relocated into shell.
+`scripts/<package>/` is the per-package dimension the hooks lack; the dispatcher supplies it
+in five lines, using a variable dotter already injects.
+
 ### The design: packages already answer "does this apply to this machine?"
 
 `dotter.packages` is injected as a table of *name → enabled* (`handlebars_helpers.rs:318`).
@@ -1550,10 +1562,26 @@ clone a second.
 
 ### Undeploy does not undo `scripts/`
 
-`scripts/<package>/` runs on deploy. Nothing reverses it on `undeploy`, so a package
-removed from a machine leaves its imperative effects behind. `pre_undeploy` exists and the
-dispatcher trick works there identically, but symmetric teardown is not designed and may
-not be worth it (most setup is not cleanly reversible).
+`scripts/<package>/*.sh` runs on deploy. Nothing reverses it on `undeploy`, so a package
+removed from a machine leaves its imperative effects behind.
+
+**Resolved as a reserved name, not as code.** Only one of dotter's four hooks is wired
+today. The other three need no new mechanism — the same rendered dispatcher works verbatim
+in any of them — so the shape is fixed now and built when something needs it:
+
+```
+scripts/<package>/*.sh           -> post_deploy   (the common case, wired)
+scripts/<package>/undeploy/*.sh  -> pre_undeploy  (reserved, not yet wired)
+```
+
+Reserving the name costs nothing and stops a later addition from being a breaking rename;
+`run_dir` must therefore iterate `*.sh` only, never recurse, so the subdirectory is inert
+until claimed. `pre_deploy` and `post_undeploy` get no reserved name — no use case has
+appeared, and inventing a four-phase taxonomy for one real need is the mistake this project
+keeps catching itself making.
+
+Symmetric teardown is still not promised: most setup is not cleanly reversible, and a
+teardown script that half-works is worse than none.
 
 ### Committed binaries — deliberate, keep
 
