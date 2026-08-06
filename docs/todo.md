@@ -57,31 +57,40 @@ Must land **before** Phases 4/5, or their cost estimate is wrong.
 
 ---
 
-## Phase 2 — multi-target  → upstream `up/02-multitarget`
+## Phase 2 — cherry-pick variables in target paths  → fork-only
 
-`[ ]` `FileTarget::Many`, closing **#186**.
+`[ ]` Cherry-pick upstream PR **#190** (`balthild:master`, +106/-13, `src/config.rs`) into
+the fork. Open and unreviewed since 2024-11-06.
 
-**The founding requirement.** All destinations for a source, co-located with that source.
+Lets a destination stay next to its source while varying per machine:
 
-`[ ]` `cache.toml` `version` field + migration on read (currently source-keyed).
+```toml
+"nvim" = "{{ config_dir }}/nvim"          # global.toml
+```
+```toml
+[variables]                                # .dotter/machines/win-work.toml
+config_dir = "${APPDATA:-/nonexistent}"
+```
 
-`[ ]` Pin the semantics the maintainer named as blockers:
-  - whole-value `""` disables everything; individual entries carry their own `if`
-  - local override **replaces the entire array**, not element-wise
+One variable per machine replaces N per-file overrides. **Do not re-open this upstream** —
+duplicating a rotting PR is worse than nothing. If it ever merges, drop the cherry-pick.
 
-`[ ]` Touch points: `Files` (`config.rs:74`), `Cache` (`config.rs:210`),
-`desired_symlinks` (`deploy.rs:80`), and `.remove(source)` at `deploy.rs:293,305,325,347`
-must become target-aware. The diff engine is already pair-keyed (`deploy.rs:265-285`).
+`[ ]` Verify it composes with the `machine` pointer (both touch `config.rs`; expect
+conflicts with `up/02-machine`).
 
 ---
 
-## Phase 3 — machine selection  → upstream `up/03-machine`, then fork-only
+## Phase 3 — machine selection  → upstream `up/02-machine`, then fork-only
 
 `[ ]` `LocalConfig.machine: Option<String>` resolving `.dotter/machines/<name>.toml`.
 Machine files may not chain.
 
 `[ ]` **Guard:** exactly one of `machine` or `packages` must be present. Defaulting
 `packages` without this turns a loud parse failure into a silent deploy-nothing.
+
+`[ ]` Revert or complete `b07664d` — a half-applied `machine` field that **does not
+compile** (`config.rs:309`, missing field in a `LocalConfig` initializer). It is the right
+idea, written without agreement. Do not build on it accidentally.
 
 `[ ]` `dotter init-machine` — `inquire` fzf-style picker listing `.dotter/machines/*.toml`,
 writing the single generated line to gitignored `local.toml`. **Fork-only.**
