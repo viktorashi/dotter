@@ -255,202 +255,116 @@ may still use env expansion — `${APPDATA:-/nonexistent}` already works today.
 A content template that genuinely needs live env opts out of classification and always
 routes to manual conflict. Acceptable degradation.
 
-## Declared variants (not "machines")
+## Machines are entities, not variants
 
-An earlier draft proposed a machine table with inheritance:
+An earlier draft here proposed a machine table with `inherits`, then replaced it with
+`[settings.variants]` — enumerated axes (`distro`, `wsl`, `gaming`) branched on with
+`{{#if}}` inside shared files.
 
-```toml
-# REJECTED
-[settings.machines]
-desktop   = { inherits = "arch-laptop" }
-work-rhel = { inherits = "arch-laptop", distro = "rhel" }
+**Both were wrong, and the second was wrong in an expensive way.** Variants push every
+difference *into* the file as a conditional, which is what forces content templating, which
+is what creates the entire reverse-sync problem this document spends most of its length
+solving. The right model is the one dotter already implements: a machine is its own entity,
+composed of layers it mostly shares with other machines.
+
+### Dotter already does this. Verified, today, zero new features
+
+The composition chain in `merge_configuration_files`:
+
+```
+global.toml packages          (must be DISJOINT — duplicate source key is a hard error,
+                               config.rs:363)
+  → local.includes[0..n]      (ordered override: package_global.files.extend(included),
+                               config.rs:298-300)
+    → <hostname>.toml         (local.toml fallback by hostname, config.rs:159-171)
+      → local `[files]`       (final override: output.files.extend, config.rs:409)
 ```
 
-**This is wrong.** If a machine's config is identical to another's, it *is* that config —
-recording "desktop is the same as arch-laptop" adds a tracked line that carries no
-information. And when it later diverges, the divergence shows up naturally as a template
-conditional or a machine-specific file. The `inherits` line never becomes the place the
-difference lives, so it is pure bookkeeping.
-
-What classification actually needs is much smaller. To render every variant of a template
-from one machine, dotter needs **the set of values each branching variable can take** —
-nothing about machines at all:
+So **each machine is one tracked file named after its hostname**, listing the layers it
+composes, the packages it enables, and its own overrides:
 
 ```toml
-[settings.variants]
-distro = ["arch", "rhel", "macos", "windows"]
-wsl    = [true, false]
-```
-
-That is one tracked key: a map of variable → possible values. Rendering all variants means
-rendering once per combination (see [Drift](#drift-when-an-identical-machine-stops-being-identical) for keeping that count
-small, and for why these are independent axes rather than one `profile` string).
-
-A machine then just *selects* values, in untracked `local.toml`:
-
-```toml
-distro   = "arch"
-wsl      = false
-packages = ["core", "desktop"]
-```
-
-Consequences:
-
-- **Identical machines cost nothing.** Two Arch boxes both say `distro = "arch"`. No
-  tracked change, nothing to commit, no drift.
-- **Divergence is created only when it exists.** Adding `"rhel"` to `variants.distro`
-  happens at the moment you write the first `{{#if (eq distro "rhel")}}`, not before.
-- **Variables already exist.** `distro` is an ordinary dotter variable — `local.toml`
-  variables are merged into the render context at `config.rs:410`, today.
-  `settings.variants` only *enumerates* them so all variants can be rendered.
-- Nothing is per-hostname, so `whoami.hostname`-style branching stays out by construction —
-  which is exactly the constraint classification needs.
-
-`dotter init-machine` therefore writes **only `local.toml`** and never touches tracked
-config. A new machine requires no commit at all.
-
-## Machine-specific files (no git branches)
-
-The question this project exists to answer: how does a file that belongs to *one* machine
-avoid being treated as generic — without git branches?
-
-Branches are the thing being replaced, and for the reason you named: with branches you are
-permanently checked out on one of them, so every machine drifts from every other while
-sharing most of its functionality. One tree, all machines, is the point.
-
-**Dotter already solves this two ways, both shipping today** — no new feature:
-
-```toml
-# 1. conditional file: parsed always, deployed only where the condition holds
-[core.files]
-"arch/pacman.conf" = { target = "/etc/pacman.conf", owner = "root", if = "(eq distro \"arch\")" }
-
-# 2. packages: local.toml selects which sets deploy at all
-[work.files]
-"ssh/work_config" = "~/.ssh/config.d/work"
+# .dotter/desktop.toml           — tracked
+includes = [".dotter/layers/arch.toml"]
+packages = ["core", "gaming"]
+[files]
+"src/zshrc" = "~/.config/zsh/.zshrc-desktop"   # override just this one
 ```
 
 ```toml
-# local.toml on the work box
-distro   = "rhel"
-packages = ["core", "work"]
+# .dotter/laptop.toml            — tracked
+includes = [".dotter/layers/arch.toml"]
+packages = ["core"]
 ```
 
-Use `if` for one-off files, packages for coherent groups. Both are per-file/per-group
-existence, orthogonal to per-file *content*, which is what templating handles.
+Verified end-to-end against a scratch `HOME`: both machines pick up the shared `arch` layer;
+desktop additionally deploys `gaming` and overrides one target; laptop deploys neither.
+`<hostname>.toml` is selected automatically with no flag.
 
-> **WSL is an axis, not a distro value.** `/etc/wsl.conf` lives *inside* the Linux distro,
-> so under WSL `dotter.linux` is true and `dotter.windows` is false — verified earlier:
-> WSL and native Windows are separate compiled binaries, and a dual-use box deploys twice
-> with two different `local.toml` files. But a WSL Arch box is still Arch, sharing almost
-> everything with a native one, so it is `distro = "arch", wsl = true` — **not** a
-> `distro` value of its own. Windows-interop files then key off `{{#if wsl}}`, leaving
-> every `distro`-conditional untouched.
+Drift is then trivial and needs no mechanism at all:
 
+| drift | how |
+|---|---|
+| desktop gains a file laptop must not have | add a package, enable it in `desktop.toml` |
+| a target path differs on one machine | `[files]` override in that machine's file |
+| several machines share a change | put it in a layer they all include |
+| WSL needs interop files native Arch must not | a `wsl.toml` layer, included only by the WSL machine |
 
-For classification this is the easy case: a file present in only one variant has nothing
-to compare against in the others, so it is trivially machine-specific. No ambiguity.
+### The decisive argument: this makes the hard problem disappear
 
-## Drift: when an identical machine stops being identical
+Every file deployed this way is a **symlink**. The target *is* the repo file. When an app
+rewrites its own config, the change is already in the repo — verified: appending to the
+deployed file changed the source.
 
-The common case: two Arch boxes start identical, then one grows things the other must not
-have. Or: some Arch config should not apply inside WSL.
+Reverse-sync, classification, three-way merge, rerere — **all of it exists only for
+templated files**. Composition does not template, so for everything it covers, the problem
+is not solved but *absent*. Minimising templating beats improving reverse-sync.
 
-The instinct is "make a new profile". **Do not.** `profile` is a single axis, so forking it
-duplicates everything the two profiles still share — every existing
-`{{#if (eq profile "arch")}}` must grow an `arch-desktop` arm. That is combinatorial
-duplication, and it is exactly the drift the project exists to prevent.
+### Where composition genuinely fails
 
-### Variants are orthogonal axes, not one string
+Grill it honestly. Composition is file-granular, so it cannot express *intra-file*
+variation. If `.zshrc` is 200 lines and 3 differ between machines, the options are:
 
-This refines the earlier "WSL is its own profile" framing. A WSL Arch box shares almost
-everything with a native Arch box; making it a separate profile duplicates that overlap.
-Model the facets independently instead:
+1. **Duplicate the file per machine** — 200 lines copied N times. This is real drift, worse
+   than anything it replaces. Never do this.
+2. **Split into fragments + the app's own include mechanism** — `source ~/.zshrc.local`,
+   git `[include]`, ssh `Include`, tmux `source-file`, nvim `require`, kitty `include`.
+   The app composes; dotter only symlinks fragments; everything stays a symlink.
+3. **Template it** — and accept the whole reverse-sync apparatus for that file.
 
-```toml
-[settings.variants]
-distro = ["arch", "rhel", "macos", "windows"]
-wsl    = [true, false]
-gaming = [true, false]
-```
+Option 2 covers most real configs, because most config formats grew an include directive
+precisely for this. **Option 3 is the residual set: single-file formats with no include
+mechanism that also need intra-file variation.**
 
-```toml
-# local.toml — laptop            # local.toml — desktop
-distro = "arch"                  distro  = "arch"
-wsl    = false                   wsl     = false
-                                 gaming  = true
-```
+`settings.variants` therefore survives, demoted: it exists **only to enumerate branch
+values for classification of that residual set**. If the residual set is empty, variants
+never need to be declared and classification never runs.
 
-Drift becomes *adding an axis*, never forking one. `{{#if gaming}}` on the desktop leaves
-every existing `distro`-conditional untouched.
+The order to apply, in order:
 
-### Both drift kinds are already handled by shipping dotter
+> **layer → app-native include → template.** Stop at the first that works.
 
-Verified in the current source — no new config mechanism is needed:
+### Two real constraints found in the source
 
-| drift | mechanism | where |
-|---|---|---|
-| a file should exist on one machine only | **packages** — `packages: Vec<String>` selects per-machine | `config.rs:142` |
-| a shared file's *contents* differ | **variables** — merged into the render context | `config.rs:410` (`recursive_extend_map`) |
+**1. `includes` cannot supply `packages`.** `IncludedConfig = BTreeMap<String, Package>`
+(`config.rs:135`) — an include patches packages, it cannot select them. And `packages` has
+no `#[serde(default)]` (`config.rs:142`), so it is mandatory. Verified: a `local.toml`
+containing only `includes = [".dotter/desktop.toml"]` fails with ``missing field `packages` ``.
 
-Both live in **untracked `local.toml`**, so per-machine divergence costs zero tracked
-changes until it is real. `settings.variants` is the only addition, and it exists solely to
-enumerate values so all variants can be rendered for classification.
+So the machine file must *be* the local config — reached by the `<hostname>.toml` fallback
+or by `-l`. It cannot be a one-line pointer.
 
-Rule of thumb: **packages for existence, variables for content.** Reach for a new `distro`
-value only when the OS/distro genuinely differs.
+**2. Hostname collisions break the fallback.** A Windows box and its WSL guest report the
+same hostname by default, yet need different machine files.
 
-### Keeping the render count sane
+Fixes, cheapest first:
 
-Rendering "all variants" is a cartesian product — `4 × 2 × 2 = 16` above — which grows badly
-as axes are added.
-
-It does not need to be paid. Classification is **per file**, and a given template
-references only a couple of variables. Scan the template source for which declared variant
-names actually appear, and take the product over just those:
-
-```
-nvim/init.lua   references {distro}         → 4 renders
-zsh/zshrc       references {distro, wsl}    → 8 renders
-gitconfig       references {}               → 1 render (trivially generic)
-```
-
-Substring matching over-approximates (a name in a comment counts), which costs extra
-renders and never wrong answers. Good enough; no handlebars AST walk needed.
-
-### Can dotter address the user about drift directly?
-
-Partly, and the useful part is free.
-
-**At edit time — yes, and it is already designed.** When an app rewrites a config and
-classification runs, a result of "conflicts against the other variants" *is* a drift
-notification. That is the natural moment to ask, because it is the moment the divergence is
-created:
-
-```
-~/.config/foo/config.toml changed since dotter wrote it.
-  lines 4-6   merge cleanly against all variants  → generic
-  line 12     conflicts against distro=rhel       → specific to distro=arch
-
-where should line 12 go?
-> the arch branch of the template
-  a new variant axis
-  generic (apply everywhere)
-  leave the target alone
-```
-
-**At add-file time — yes, cheaply.** A file appearing in the repo with no package
-assignment is a prompt: which package? Choosing a machine-specific one *is* declaring the
-drift.
-
-**Proactively, across machines — no, and it cannot be.** `local.toml` is untracked and
-per-machine by design, so this machine has no idea what the desktop selected. Dotter can
-only ever report divergence between *variants it can render*, never between *machines it
-cannot see*. That is a consequence of keeping per-machine state out of the repo, which is
-the right trade.
-
-So: drift is surfaced at the two moments the user is already present, and not pretended
-about otherwise.
+- Set the WSL hostname in `/etc/wsl.conf` (`[network]\nhostname = desktop-wsl`) — and that
+  file is itself a dotfile deployed by dotter. Zero code.
+- `dotter -l .dotter/machines/desktop-wsl.toml`, via an alias or `DOTTER_LOCAL_CONFIG`.
+- Only if both fail: give `packages` a `serde(default)` and let an include carry it, making
+  a one-line `local.toml` pointer legal. ~10 lines — and a far better minimal upstream
+  feature than `settings.variants` ever was.
 
 ## Multi-target
 
@@ -726,6 +640,15 @@ Fresh system → `dotter deploy` → one prompt → configured.
 ## Phases
 
 Each phase is an independently PR-shaped unit.
+
+### Phase 0a — port the dotfiles with composition only, zero templates
+
+Before any code: express all machines as `<hostname>.toml` + shared layers, using only
+what ships today. Then measure how many files actually need *intra-file* variation that no
+app-native include can absorb.
+
+That number decides whether Phases 2 and 3 are worth building at all. If it is zero, the
+reverse-sync machinery has no users and should not exist.
 
 ### Phase 0 — golden config test corpus
 
