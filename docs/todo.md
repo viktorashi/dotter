@@ -42,16 +42,38 @@ and how fast?
 
 ## Phase 1 — Windows hard link + junction fallback  → upstream `up/01-winlink`
 
-`[ ]` When `symlinks_enabled` is false, use hard links for files and NTFS junctions for
-directories instead of copying.
-
 **Highest-value item in the plan.** `deploy.rs:67-84` currently converts *every* file to a
-rendered copy when symlinks are unavailable — so on a Windows box without Developer Mode,
-nothing round-trips and the reverse-sync problem applies to 100% of files. Both hard links
-and junctions are privilege-free, and a hard link shares an inode, preserving round-trip.
+rendered copy when symlinks are unavailable — so on a Windows box without Developer Mode
+nothing round-trips and reverse-sync applies to 100% of files. Corporate machines are
+exactly where Developer Mode is locked down.
 
-`[ ]` Document the limits honestly: same-volume requirement; junctions are directory-only;
-fall back to copying when neither is possible.
+`[ ]` Use hard links for files and NTFS junctions for directories when
+`filesystem::symlinks_enabled` is false. Both are privilege-free; a hard link shares an
+inode, so round-trip is preserved.
+
+`[ ]` **Teach dotter to recognise its own hard links.** Verified problem, not speculation:
+`get_file_state` (`filesystem.rs:696`) detects links via `fs::read_link`, which **fails on a
+hard link**. The target then reads as `FileState::File(..)` and `compare_symlink`
+(`filesystem.rs:737`) falls to `_ => SymlinkComparison::TargetNotSymlink` — dotter treats
+its own link as a foreign file and skips it on every subsequent deploy.
+
+  - `[ ]` New `FileState` variant / `SymlinkComparison` arm for "target is the same file as
+    source"
+  - `[ ]` Same-file detection, platform-split: `st_dev`+`st_ino` (`std::os::unix::fs::MetadataExt`)
+    on unix; `dwVolumeSerialNumber` + `nFileIndex{High,Low}` from `GetFileInformationByHandle`
+    on Windows
+  - `[ ]` Extend `compare_symlink` to return `Identical` for it
+  - `[ ]` Check whether `read_link` succeeds on a junction (it is a reparse point) — verify,
+    do not assume
+
+`[ ]` Document the limits honestly: hard links require **same volume**; junctions are
+directory-only; fall back to copying when neither is possible.
+
+`[ ]` Confirm `cache.toml` needs no format change (expected: none — undeploying a hard link
+is the same delete as a symlink).
+
+**Size: ~150-200 lines** across `filesystem.rs` and `deploy.rs`. Revised upward after
+reading `compare_symlink`; the original "swap the syscall" estimate was wrong.
 
 Must land **before** Phases 4/5, or their cost estimate is wrong.
 
@@ -138,6 +160,37 @@ Closes **#51**, which the maintainer personally abandoned. **Do not PR until dem
 
 `[ ]` Real dotfiles, multiple machines: one source → multiple targets; an app rewriting its
 own config; the edit landing in the right place; rerere making it silent the second time.
+
+---
+
+## Deferred — multi-target (`FileTarget::Many`)
+
+Not scheduled. Requirement clarified as *"different places on different machines"*, which is
+one target per machine and needs no schema change. See `docs/DESIGN.md` →
+*Multi-target: dropped*.
+
+**Deferring is free and this was verified**, not assumed:
+
+- `FileTarget` is an untagged serde enum → `Many` is purely additive, every current config
+  still parses.
+- Collides with `up/01-winlink` only, in the `deploy.rs` file-classification loop. One
+  function, mechanically resolvable.
+- No shared `cache.toml` migration to bundle: multi-target needs one, Windows linking does
+  not.
+- Slots in as an independent 4th branch cut from `origin/master` whenever wanted.
+
+`[ ]` **Trigger to watch for:** a duplicate source file, or a repo-internal symlink, created
+*purely* to obtain a second target. Record each instance here. Two or three justify building
+it.
+
+Known real case, currently hypothetical for this repo: VSCode + VSCodium sharing one
+settings directory — `settings.json` has no include directive, so the app cannot compose it.
+Workaround today is a repo-internal symlink as a second source path (needs `core.symlinks` +
+Developer Mode on Windows).
+
+If courting the maintainer ever becomes the goal, this is his most-requested unimplemented
+feature (#186, *"pretty highly requested"*, *"I'm welcoming PRs on this"*) — but that is
+building it for him, not for us.
 
 ---
 
