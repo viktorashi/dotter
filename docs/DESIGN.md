@@ -399,6 +399,50 @@ the second one — **what does this machine diverge on** — and a machine file 
 construction: every divergence for that machine is in one place, reviewable in one diff.
 The by-machine index is the better fit for the actual goal.
 
+### Deferring is free — verified against the actual code
+
+Two realistic same-machine cases were raised, and they are not fake:
+
+- **VSCode + VSCodium** — same settings, two directories, one machine. `settings.json` has
+  **no include directive**, so the app cannot compose it. This is a genuine hole.
+- **vim + nvim** — weaker: nvim *does* have an include mechanism, and the idiomatic init is
+  `set runtimepath^=~/.vim` + `source ~/.vimrc`. That is rung 2 of the ladder, not a
+  multi-target need.
+
+Zero-code workaround for the VSCodium shape: a second source path that is a **repo-internal
+symlink** to the first.
+
+```toml
+"vscode/User"   = "~/.config/Code/User"
+"vscodium/User" = "~/.config/VSCodium/User"    # `vscodium` is a symlink to `vscode` in-repo
+```
+
+Git tracks symlinks; dotter links the link; it resolves. Caveat: repo-internal symlinks need
+`core.symlinks` and Developer Mode on Windows — the same wall as *Windows linking*, so it is
+not free there.
+
+**Why it can wait.** `FileTarget` is an untagged serde enum, so a `Many` variant is purely
+additive — every config that parses today still parses. Adding it in six months costs
+exactly what it costs now. Measured overlap with the planned branches:
+
+| branch | files | collides with multi-target? |
+|---|---|---|
+| `up/00-tests` | `tests/` | no |
+| `up/01-winlink` | `filesystem.rs`, `deploy.rs:67-84` | **yes** — same file-classification loop in `deploy.rs` |
+| `up/02-machine` | `config.rs` (`LocalConfig`) | no — different struct from `FileTarget`/`Cache` |
+
+One conflict, in one function, mechanically resolvable. And there is **no shared
+`cache.toml` migration** to bundle: multi-target needs one (source → *one* target today),
+Windows linking is not expected to. So doing them together saves nothing.
+
+Order matters strategically, not technically: `up/01-winlink` is a bug fix and lands in the
+same-day bucket, while multi-target is design-blocked (#186 open since 2024). Stacking a
+fast fix behind a slow feature rots both.
+
+**The tell to watch for:** the moment a duplicate source file or a repo-internal symlink is
+created *purely to obtain a second target*, write it down. Two or three instances justify
+building it. Until then it is one hypothetical.
+
 ### Recovering most of the co-location anyway: upstream PR #190
 
 `balthild:master` — *"Expand variables in target paths"*, +106/-13, `src/config.rs` only,
@@ -467,11 +511,52 @@ Known limits, to be documented rather than hidden:
   already does.
 - Junctions are directory-only and do not follow across volumes either.
 
+### This is bigger than swapping a syscall — verified
+
+`filesystem::get_file_state` (`filesystem.rs:696`) detects links with `fs::read_link`:
+
+```rust
+if let Ok(target) = fs::read_link(path) {
+    return Ok(FileState::SymbolicLink(target));
+}
+```
+
+**A hard link is not a symlink**, so `read_link` fails on one. The target then reads as
+`FileState::File(contents)`, and `compare_symlink` (`filesystem.rs:737`) falls through to
+its catch-all arm:
+
+```rust
+_ => SymlinkComparison::TargetNotSymlink   // "target already exists and isn't a symlink"
+```
+
+So dotter would treat **its own hard link** as a foreign file and refuse to touch it. Every
+deploy after the first would skip, and `--force` would delete and recreate.
+
+The work therefore includes:
+
+1. A new `FileState` variant (or a `SymlinkComparison` arm) for "target is the same file as
+   source".
+2. **Same-file detection**, which is platform-split: `st_dev`/`st_ino` via
+   `std::os::unix::fs::MetadataExt` on unix; `dwVolumeSerialNumber` + `nFileIndex{High,Low}`
+   from `GetFileInformationByHandle` on Windows.
+3. `compare_symlink` extended to accept it as `Identical`.
+4. Junction detection for directories — a junction *is* a reparse point, so `read_link` may
+   succeed on it; verify rather than assume.
+
+Revised size: **~150-200 lines** across `filesystem.rs` and `deploy.rs`, not a small patch.
+Still self-contained, still a bug fix, but not an afternoon.
+
+### Cache impact: none expected
+
+`Cache { symlinks, templates }` maps source → target. Undeploying a hard link is the same
+operation as undeploying a symlink — delete the target — so no format change is expected.
+Confirm this before writing the migration-free assumption into the PR.
+
 ### Ordering
 
 This lands **before** any reverse-sync work. If Windows can link, the residual templated set
-stays small and Phases 2/3 stay optional. If it cannot, they become mandatory — so the
-cheap fix must be attempted first, or the whole cost estimate downstream is wrong.
+stays small and Phases 4/5 stay optional. If it cannot, they become mandatory — so the
+link fix must be attempted first, or the whole cost estimate downstream is wrong.
 
 ## Bootstrap
 
