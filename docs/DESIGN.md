@@ -49,7 +49,7 @@ Fork audit (GitHub API, 2026-08):
 Closest shipped things elsewhere:
 
 | Tool | Reverse-sync on a template | Mechanism |
-|---|---|---|
+| --- | --- | --- |
 | chezmoi | partial, manual | `chezmoi merge` → 3-way in your editor: Destination (live) / Source (the raw `.tmpl`) / Target (rendered). You hand-type the template edit. |
 | chezmoi | lossy | `add --autotemplate` regenerates a template by greedy string→`{{ .var }}` substitution; discards your existing conditionals and comments |
 | chezmoi | refuses | `re-add` — silent `continue` on `Attr().Template` |
@@ -67,7 +67,7 @@ Unix seams. Dotter's contribution is **merge base + branch classification**. Eve
 else is an existing tool.
 
 | Job | Owner |
-|---|---|
+| --- | --- |
 | Which source file → which target(s) on this machine | **dotter** |
 | What did I last write there (the merge base) | **dotter** — `.dotter/cache/` already is exactly this |
 | Detect that the target drifted | **dotter** — `compare_template` already does this |
@@ -158,7 +158,7 @@ binary already in the design.
 Verified empirically (`git merge-file --diff3`):
 
 | edit on `arch` | result | classification |
-|---|---|---|
+| --- | --- | --- |
 | `theme = dark` → `light` (identical on both renders) | exit 0, clean | generic ✓ |
 | `pkg = pacman` → `yay` (differs: rhel has `dnf`) | exit 1, conflict | machine-specific ✓ |
 | adds `font = mono`, not adjacent to a divergent line | exit 0, clean | generic ✓ |
@@ -304,7 +304,7 @@ desktop additionally deploys `gaming` and overrides one target; laptop deploys n
 Drift is then trivial and needs no mechanism at all:
 
 | drift | how |
-|---|---|
+| --- | --- |
 | desktop gains a file laptop must not have | add a package, enable it in `desktop.toml` |
 | a target path differs on one machine | `[files]` override in that machine's file |
 | several machines share a change | put it in a layer they all include |
@@ -415,7 +415,7 @@ nor `mergiraf`.
 Both dotter and mergiraf ship static release binaries:
 
 | | targets | download | on disk |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | dotter | linux-x64-musl, linux-arm64-musl, macos-arm64, windows-x64-msvc | 3–5 MB | 3–5 MB |
 | mergiraf | linux x64/arm64 gnu+musl, macos x64/arm64, windows x64 | 6.4–7.1 MB | **71 MB** |
 
@@ -508,7 +508,7 @@ The command has three parts: **fetcher**, **transport**, **interpreter**. Unific
 on two of the three.
 
 | | bare Linux | bare Windows 10+ |
-|---|---|---|
+| --- | --- | --- |
 | interpreters | `sh` | `cmd`, `powershell` |
 | fetchers | `curl` / `wget` | `curl.exe`, `Invoke-WebRequest` |
 
@@ -548,6 +548,7 @@ Result — same URL, and the commands differ only in the unavoidable wrapper:
 ```sh
 curl -fsSL https://dott.er/i | sh -s viktorashi     # Linux / macOS
 ```
+
 ```powershell
 irm https://dott.er/i | iex                          # Windows
 ```
@@ -562,8 +563,6 @@ Nobody ships a polyglot installer: bun uses `curl -fsSL https://bun.com/install`
 `powershell -c "irm bun.sh/install.ps1 | iex"`; rustup uses `sh.rustup.rs` plus a separate
 `rustup-init.exe`; starship, deno, uv and homebrew all have two entry points. That is
 strong evidence the second file is not the part worth optimising away.
-
-
 
 Answers "on a brand-new machine, which existing config do I fork from?" without
 hand-editing TOML.
@@ -583,10 +582,10 @@ hand-editing TOML.
   windows
 ```
 
-5. **Write `.dotter/local.toml` only** — the selected values and the `packages` to enable.
+1. **Write `.dotter/local.toml` only** — the selected values and the `packages` to enable.
    Untracked, per-machine. **Tracked config is never modified**, so a new machine needs no
    commit.
-6. If the probe matches no declared value, offer to add one — that *is* a tracked change,
+2. If the probe matches no declared value, offer to add one — that *is* a tracked change,
    and it is the correct moment for one, because a genuinely new variant now exists.
 
 **Implementation: `inquire`.** Its default features are
@@ -636,68 +635,6 @@ dotter setup-git → git config rerere.enabled true
 ```
 
 Fresh system → `dotter deploy` → one prompt → configured.
-
-## Phases
-
-Each phase is an independently PR-shaped unit.
-
-### Phase 0a — port the dotfiles with composition only, zero templates
-
-Before any code: express all machines as `<hostname>.toml` + shared layers, using only
-what ships today. Then measure how many files actually need *intra-file* variation that no
-app-native include can absorb.
-
-That number decides whether Phases 2 and 3 are worth building at all. If it is zero, the
-reverse-sync machinery has no users and should not exist.
-
-### Phase 0 — golden config test corpus
-
-**Verified: dotter has no `tests/` directory and 19 unit tests total.** `--dry-run` only
-bumps verbosity (`args.rs:123`); there is no validate-only path.
-
-A `validate` subcommand risks rejection as redundant with `--dry-run`. A **golden-file
-config test corpus** — parse fixture configs, assert the merged output — is pure
-addition, zero risk to existing behaviour, and is the backwards-compatibility proof every
-later phase depends on. Maintainers merge test PRs.
-
-Secondary probe: cherry-pick `Juemuren/dotter`'s watch debounce (+21/-3, `src/watch.rs`
-only), which closes open issue **#196** (watch + post-deploy hook infinite recursion).
-Not our code, near-zero cost, and it measures the single most important unknown: does the
-maintainer merge a small obviously-correct fix, and how fast?
-
-### Phase 1 — multi-target
-
-`FileTarget::Many`, cache versioning + migration, the two semantics above. Closes **#186**.
-Port the real dotfiles to it — that is the demo.
-
-### Phase 1b — `dotter init-machine` + bootstrap scripts
-
-`inquire`-based variant picker, plus the two installer scripts (already drafted in
-`bootstrap/`). Depends on declared variants existing, but not on classification, so it can
-land before Phase 3.
-
-**Stays in the fork, not upstreamed.** The bootstrap scripts assume `settings.variants`
-and `dotter setup-git`, neither of which exists upstream; and a `curl | sh` installer is a
-project-identity decision that belongs to the maintainer, not a contributor.
-
-### Phase 2 — `dotter merge` + `dotter setup-git`
-
-Implements **#193**. On `TemplateComparison::Changed`, emit the 3-way (base =
-`.dotter/cache/`, ours = live target, theirs = fresh render) and shell out to `merge.tool`.
-~120 lines, two separate PRs. SuperCuber said in #51 he is *"open to implementing this as
-a flag"*.
-
-### Phase 3 — declared machines + branch classification
-
-The research. Build in the fork, prove on real dotfiles, **do not PR until demoed**.
-Closes **#51**, which the maintainer personally gave up on — which is exactly why a
-working demo is worth more than a design doc.
-
-### Phase 4 — demo repo
-
-Real dotfiles, four machines, showing: one source → multiple per-machine targets; an app
-rewriting its own config; the edit landing in the correct template branch; rerere making
-it silent the second time.
 
 ## Upstreaming strategy
 
