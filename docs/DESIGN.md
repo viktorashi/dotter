@@ -1356,6 +1356,69 @@ rotz's 13, 2 are. Sizes and touched files are measured, not estimated.
 - **`mermonia/peridot`** (Go, 0★) — render to an artifact dir and symlink the artifact, so
   the deployed file stays a link. One idea, no code.
 
+## Gaps: named, not yet designed
+
+Found while classifying the on-demand scripts. Each is a real hole in the plan; none is
+solved here.
+
+### Two more scripts die, and one of them was the "genuine recipe"
+
+- `backup-remove-and-clone.sh` **is the current bootstrap**, and every line of it is
+  replaced: it hardcodes a six-entry backup list (dotter without `--force` already refuses
+  to clobber, so no list is needed), `rm -rf ~/.cfg` + bare clone (`bootstrap/install.sh`
+  does an ordinary clone), then wires up per-branch upstreams — `conf switch mac`, `conf
+  switch windows10`, `conf branch --set-upstream-to=…` — which is the branch-per-machine
+  model made flesh and evaporates entirely with one tree. **Delete.**
+- `configupdatemason.sh` is `ls ~/.local/share/nvim/mason/packages | sort` piped into a Lua
+  literal. The roster is **discovered from what happens to be installed**, never authored —
+  which is *precisely why* it drifted: two machines, two `ls` outputs, last writer wins. The
+  fix is to declare the list instead of snapshotting it. And since the measured difference
+  between the two rosters is drift rather than machine need, that declaration is **one
+  shared plain file** — no template, no variable, no recipe. **Delete.**
+
+So both "genuine recipes" are gone and the justfile is down to `generate-readme`. One
+recipe barely justifies a file, but the alternative is a `.sh` in `docs/` that gets
+forgotten — which is exactly what happened to `docs/Makefile`, and why
+`generate-readme.sh` exists as a second copy of it. Keep the justfile; it is thin on
+purpose.
+
+### Secrets — no story at all
+
+`.ssh/config` is tracked, and on a **public** repo it currently carries internal corporate
+hostnames and account names (`stratec-db14.intern.stratec.com`, `User rvsclient`,
+`User qas`). `.gnupg/gpg-agent.conf` is tracked too (benign today, but the directory is a
+foot-gun). This is not merely an undesigned feature — it is a live exposure, and it is also
+the single most machine-bound file in the corpus.
+
+Options, none chosen: a second private repo as an extra layer; a gitignored
+`files-local/` root; or in-repo encryption (`age`/`sops`, as chezmoi does). Note the
+constraint that any answer must survive bootstrap on a bare machine, which is exactly what
+makes encryption awkward (the key has to arrive first).
+
+### Undeploy does not undo `scripts/`
+
+`scripts/<package>/` runs on deploy. Nothing reverses it on `undeploy`, so a package
+removed from a machine leaves its imperative effects behind. `pre_undeploy` exists and the
+dispatcher trick works there identically, but symmetric teardown is not designed and may
+not be worth it (most setup is not cleanly reversible).
+
+### Committed binaries
+
+`auto-hotkey/compiled-hotkeys/autohotkeys.exe` is tracked. The repo is only 2.1 MB today so
+this is not urgent, but a compiled artifact in a config tree is a build output, and
+`filesystem::is_template` reads every source file looking for `{{`.
+
+### The `conf` command and the repo's own name
+
+Two loose ends around migration:
+
+- `conf` is muscle memory and is defined as `git --git-dir=$HOME/.cfg --work-tree=$HOME`.
+  After the port there is no bare repo, so it must be redefined or retired — deliberately,
+  not by accident.
+- The repo is `github.com/viktorashi/dotfiles`, but `backup-remove-and-clone.sh` clones
+  `viktorashi/my-config`. Which name survives, and whether the existing history is carried
+  over or the ported tree starts fresh, is undecided.
+
 ## Upstreaming strategy
 
 Maintainer record (GitHub API, 2026-08): small obviously-correct PRs merge same-day
