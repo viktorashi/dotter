@@ -278,28 +278,31 @@ nothing about machines at all:
 
 ```toml
 [settings.variants]
-profile = ["arch", "rhel", "macos", "windows"]
+distro = ["arch", "rhel", "macos", "windows"]
+wsl    = [true, false]
 ```
 
-That is one tracked key holding a list of strings. Rendering all variants means rendering
-once per value.
+That is one tracked key: a map of variable → possible values. Rendering all variants means
+rendering once per combination (see [Drift](#drift-when-an-identical-machine-stops-being-identical) for keeping that count
+small, and for why these are independent axes rather than one `profile` string).
 
-A machine then just *selects* a value, in untracked `local.toml`:
+A machine then just *selects* values, in untracked `local.toml`:
 
 ```toml
-profile = "arch"
+distro   = "arch"
+wsl      = false
 packages = ["core", "desktop"]
 ```
 
 Consequences:
 
-- **Identical machines cost nothing.** Two Arch boxes both say `profile = "arch"`. No
+- **Identical machines cost nothing.** Two Arch boxes both say `distro = "arch"`. No
   tracked change, nothing to commit, no drift.
-- **Divergence is created only when it exists.** Adding `"rhel"` to `variants.profile`
-  happens at the moment you write the first `{{#if (eq profile "rhel")}}`, not before.
-- **Variables already exist.** `profile` is an ordinary dotter variable; templates branch
-  on it with machinery that ships today. `settings.variants` only *enumerates* it so all
-  variants can be rendered.
+- **Divergence is created only when it exists.** Adding `"rhel"` to `variants.distro`
+  happens at the moment you write the first `{{#if (eq distro "rhel")}}`, not before.
+- **Variables already exist.** `distro` is an ordinary dotter variable — `local.toml`
+  variables are merged into the render context at `config.rs:410`, today.
+  `settings.variants` only *enumerates* them so all variants can be rendered.
 - Nothing is per-hostname, so `whoami.hostname`-style branching stays out by construction —
   which is exactly the constraint classification needs.
 
@@ -308,7 +311,7 @@ config. A new machine requires no commit at all.
 
 ## Machine-specific files (no git branches)
 
-The question this project exists to answer: how does a file that belongs to *one* profile
+The question this project exists to answer: how does a file that belongs to *one* machine
 avoid being treated as generic — without git branches?
 
 Branches are the thing being replaced, and for the reason you named: with branches you are
@@ -320,7 +323,7 @@ sharing most of its functionality. One tree, all machines, is the point.
 ```toml
 # 1. conditional file: parsed always, deployed only where the condition holds
 [core.files]
-"arch/pacman.conf" = { target = "/etc/pacman.conf", owner = "root", if = "(eq profile \"arch\")" }
+"arch/pacman.conf" = { target = "/etc/pacman.conf", owner = "root", if = "(eq distro \"arch\")" }
 
 # 2. packages: local.toml selects which sets deploy at all
 [work.files]
@@ -329,23 +332,125 @@ sharing most of its functionality. One tree, all machines, is the point.
 
 ```toml
 # local.toml on the work box
-profile  = "rhel"
+distro   = "rhel"
 packages = ["core", "work"]
 ```
 
 Use `if` for one-off files, packages for coherent groups. Both are per-file/per-group
 existence, orthogonal to per-file *content*, which is what templating handles.
 
-> **WSL is its own profile, not "windows".** `/etc/wsl.conf` lives *inside* the Linux
-> distro, so under WSL `dotter.linux` is true and `dotter.windows` is false — verified
-> earlier: WSL and native Windows are separate compiled binaries. A machine running both
-> deploys twice, once per environment, and they are two different profiles
-> (`wsl` and `windows`) selected by two different `local.toml` files. Nothing is ever
-> tagged as both.
+> **WSL is an axis, not a distro value.** `/etc/wsl.conf` lives *inside* the Linux distro,
+> so under WSL `dotter.linux` is true and `dotter.windows` is false — verified earlier:
+> WSL and native Windows are separate compiled binaries, and a dual-use box deploys twice
+> with two different `local.toml` files. But a WSL Arch box is still Arch, sharing almost
+> everything with a native one, so it is `distro = "arch", wsl = true` — **not** a
+> `distro` value of its own. Windows-interop files then key off `{{#if wsl}}`, leaving
+> every `distro`-conditional untouched.
 
 
 For classification this is the easy case: a file present in only one variant has nothing
 to compare against in the others, so it is trivially machine-specific. No ambiguity.
+
+## Drift: when an identical machine stops being identical
+
+The common case: two Arch boxes start identical, then one grows things the other must not
+have. Or: some Arch config should not apply inside WSL.
+
+The instinct is "make a new profile". **Do not.** `profile` is a single axis, so forking it
+duplicates everything the two profiles still share — every existing
+`{{#if (eq profile "arch")}}` must grow an `arch-desktop` arm. That is combinatorial
+duplication, and it is exactly the drift the project exists to prevent.
+
+### Variants are orthogonal axes, not one string
+
+This refines the earlier "WSL is its own profile" framing. A WSL Arch box shares almost
+everything with a native Arch box; making it a separate profile duplicates that overlap.
+Model the facets independently instead:
+
+```toml
+[settings.variants]
+distro = ["arch", "rhel", "macos", "windows"]
+wsl    = [true, false]
+gaming = [true, false]
+```
+
+```toml
+# local.toml — laptop            # local.toml — desktop
+distro = "arch"                  distro  = "arch"
+wsl    = false                   wsl     = false
+                                 gaming  = true
+```
+
+Drift becomes *adding an axis*, never forking one. `{{#if gaming}}` on the desktop leaves
+every existing `distro`-conditional untouched.
+
+### Both drift kinds are already handled by shipping dotter
+
+Verified in the current source — no new config mechanism is needed:
+
+| drift | mechanism | where |
+|---|---|---|
+| a file should exist on one machine only | **packages** — `packages: Vec<String>` selects per-machine | `config.rs:142` |
+| a shared file's *contents* differ | **variables** — merged into the render context | `config.rs:410` (`recursive_extend_map`) |
+
+Both live in **untracked `local.toml`**, so per-machine divergence costs zero tracked
+changes until it is real. `settings.variants` is the only addition, and it exists solely to
+enumerate values so all variants can be rendered for classification.
+
+Rule of thumb: **packages for existence, variables for content.** Reach for a new `distro`
+value only when the OS/distro genuinely differs.
+
+### Keeping the render count sane
+
+Rendering "all variants" is a cartesian product — `4 × 2 × 2 = 16` above — which grows badly
+as axes are added.
+
+It does not need to be paid. Classification is **per file**, and a given template
+references only a couple of variables. Scan the template source for which declared variant
+names actually appear, and take the product over just those:
+
+```
+nvim/init.lua   references {distro}         → 4 renders
+zsh/zshrc       references {distro, wsl}    → 8 renders
+gitconfig       references {}               → 1 render (trivially generic)
+```
+
+Substring matching over-approximates (a name in a comment counts), which costs extra
+renders and never wrong answers. Good enough; no handlebars AST walk needed.
+
+### Can dotter address the user about drift directly?
+
+Partly, and the useful part is free.
+
+**At edit time — yes, and it is already designed.** When an app rewrites a config and
+classification runs, a result of "conflicts against the other variants" *is* a drift
+notification. That is the natural moment to ask, because it is the moment the divergence is
+created:
+
+```
+~/.config/foo/config.toml changed since dotter wrote it.
+  lines 4-6   merge cleanly against all variants  → generic
+  line 12     conflicts against distro=rhel       → specific to distro=arch
+
+where should line 12 go?
+> the arch branch of the template
+  a new variant axis
+  generic (apply everywhere)
+  leave the target alone
+```
+
+**At add-file time — yes, cheaply.** A file appearing in the repo with no package
+assignment is a prompt: which package? Choosing a machine-specific one *is* declaring the
+drift.
+
+**Proactively, across machines — no, and it cannot be.** `local.toml` is untracked and
+per-machine by design, so this machine has no idea what the desktop selected. Dotter can
+only ever report divergence between *variants it can render*, never between *machines it
+cannot see*. That is a consequence of keeping per-machine state out of the repo, which is
+the right trade.
+
+So: drift is surfaced at the two moments the user is already present, and not pretended
+about otherwise.
 
 ## Multi-target
 
@@ -553,20 +658,21 @@ hand-editing TOML.
    `sw_vers` on macOS, build number on Windows.
 2. **Read** `settings.variants` from the freshly cloned `global.toml`.
 3. **Rank** candidates by similarity to the probe, preselecting the best match.
-4. **Present** an fzf-style filter-as-you-type list:
+4. **Present** one fzf-style filter-as-you-type list *per declared axis*, auto-detected
+   value preselected:
 
 ```
-? which profile does this machine use?  (type to filter)
-> arch      ← best match for this machine (linux/arch)
-  rhel
+? distro  (type to filter)          ? wsl
+> arch    ← detected (linux/arch)   > false  ← detected
+  rhel                                true
   macos
   windows
 ```
 
-5. **Write `.dotter/local.toml` only** — the selected `profile` and the `packages` for it.
+5. **Write `.dotter/local.toml` only** — the selected values and the `packages` to enable.
    Untracked, per-machine. **Tracked config is never modified**, so a new machine needs no
    commit.
-6. If the probe matches no declared variant, offer to add one — that *is* a tracked change,
+6. If the probe matches no declared value, offer to add one — that *is* a tracked change,
    and it is the correct moment for one, because a genuinely new variant now exists.
 
 **Implementation: `inquire`.** Its default features are
@@ -643,7 +749,7 @@ Port the real dotfiles to it — that is the demo.
 
 ### Phase 1b — `dotter init-machine` + bootstrap scripts
 
-`inquire`-based profile picker, plus the two installer scripts (already drafted in
+`inquire`-based variant picker, plus the two installer scripts (already drafted in
 `bootstrap/`). Depends on declared variants existing, but not on classification, so it can
 land before Phase 3.
 
