@@ -9,6 +9,8 @@ Repo-local rules for AI agents working on this fork of
 
 Things that stay true regardless of implementation:
 
+- NOTHING leaves your dotfiles repo (templated or otherwise) without having a breadcrumb back to the source. So that all you have to do is point a git client to ~/.dotfiles and you're set. Guaranteed. No edge-cases.
+- If something in the repo is not linked somewhere outside it, then it's probably a script.
 - **One tree, all machines.** Git branches per machine are the thing being replaced — you
   are permanently checked out on one, so every machine drifts while sharing most of its
   functionality.
@@ -45,7 +47,7 @@ Chat is ephemeral and gets truncated. Any finding, decision, rejected alternativ
 verified fact belongs in a file, in the same turn it is produced:
 
 | what | where |
-|---|---|
+| --- | --- |
 | architecture, rationale, rejected alternatives, verified facts | `docs/DESIGN.md` |
 | ordered actionable work | `docs/todo.md` |
 | rules for agents, project vision | `AGENTS.md` (this file) |
