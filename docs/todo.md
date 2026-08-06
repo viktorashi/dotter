@@ -64,6 +64,24 @@ deploy.
 `[ ]` Note which of `docs/` is neither: `docs/cfg-bin/git` is a wrapper meant to be on
 `PATH`, so it is a `files/` entry, not a script. `docs/legacy-shi/` is dead — delete it.
 
+`[ ]` Place the **on-demand** commands — the third category, neither placed nor run on
+deploy. Rules and the per-file verdicts are in `docs/DESIGN.md` → *The third category:
+things you run yourself*. Concretely:
+
+  - `restore-nvim-session.sh`, `tmux-config.sh` — one line each. **Delete**, make them shell
+    aliases.
+  - `no-exe-wrapper-scripts.sh` — generates two static 2-line wrappers. **Delete**; commit
+    `files/bin/wt` and `files/bin/im` instead.
+  - `generate-readme.sh` **and** `docs/Makefile` — the same `pandoc` line, twice. Both go;
+    one `just generate-readme` recipe replaces them.
+  - `backup-remove-and-clone.sh`, `startup-scripts/configupdatemason.sh` — the only two
+    genuine recipes. Move to a repo-root `justfile`.
+
+`[ ]` **Do not hand-merge `mason.lua`.** It is *generated* by `configupdatemason.sh`, so its
+two divergent LSP rosters are a regeneration artifact — whichever machine ran the script
+last won. Reconcile by taking the union of what is actually wanted and re-running the
+recipe, and leave it out of the review diff below.
+
 `[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
 composition only, **zero content templates**. Select with `-l` for now (the `machine`
 pointer does not exist yet).
@@ -76,10 +94,12 @@ pointer does not exist yet).
 users and must not be built. Nothing downstream is justified until this is measured.
 
 `[ ]` **Produce a review list, do not decide alone.** Most of the 1478 lines reconcile
-mechanically (take the newest branch). Some do not — `mason.lua`'s two divergent LSP
-rosters is the known example, where both sides added tools deliberately. Collect every such
-file into a single diff for the user to adjudicate. Explicitly deferred by the user: *"what
-cannot be easily reconciled from my config you give to me to look at, but not right now."*
+mechanically (take the newest branch). Some do not — where both sides made a deliberate,
+incompatible edit. Collect every such file into a single diff for the user to adjudicate.
+`mason.lua` was the presumed example and is **not** one (it is generated — see above), so
+this list may turn out short; report the count either way. Explicitly deferred by the user:
+*"what cannot be easily reconciled from my config you give to me to look at, but not right
+now."*
 
 `[ ]` Keep the pre-port branches reachable (tag them). Phase 5's classifier needs them as
 ground truth: a run over `arch-wsl` vs `windows10` should surface ≈29 candidate lines, not

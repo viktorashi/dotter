@@ -584,6 +584,59 @@ this is a real feature for a later phase, not a shell state-file hack now.
 ~/.some-marker ] && exit 0` guard, build `onchange`. Until then, one documented rule
 ("scripts must be idempotent") costs nothing.
 
+### The third category: things you run yourself
+
+`files/` is "placed", `scripts/` is "run on deploy". A third kind exists and the current
+repo has a pile of it: commands invoked **on demand**, during normal use of the machine.
+`docs/` currently holds `backup-remove-and-clone.sh`, `generate-readme.sh`,
+`restore-nvim-session.sh`, `tmux-config.sh`, `startup-scripts/configupdatemason.sh`,
+`no-exe-wrapper-scripts.sh`, plus a `docs/Makefile` (present on all three branches, one
+recipe).
+
+Reading them, most are not a third category at all:
+
+| current file | what it actually is | destination |
+|---|---|---|
+| `restore-nvim-session.sh` | one line, `exec nvim "+lua …"` | a shell alias — delete the file |
+| `tmux-config.sh` | one line, `tmux source-file …` | a shell alias — delete the file |
+| `generate-readme.sh` | one `pandoc` line | **already duplicated** as the `generate-readme` recipe in `docs/Makefile` |
+| `no-exe-wrapper-scripts.sh` | `echo`s two static 2-line wrappers into `~/.local/bin` | those wrappers are just files → `files/bin/wt`, `files/bin/im` |
+| `backup-remove-and-clone.sh` | operates on `$HOME` / the repo | a recipe |
+| `configupdatemason.sh` | regenerates `mason.lua` from what is installed | a recipe |
+
+So of six scripts: two are aliases, one is a duplicate of a recipe that already exists, one
+should be two plain files, and **two** are genuine. The pile was never a missing feature —
+it was a missing place to put things, which is exactly the discoverability failure the
+`docs/Makefile` also demonstrates by having been forgotten and re-implemented as a `.sh`.
+
+**Finding with consequences for Phase 0a:** `configupdatemason.sh` *generates*
+`.config/nvim/lua/plugins/mason.lua`. The two divergent LSP rosters flagged as
+unreconcilable drift are therefore a **regeneration artifact**, not two considered
+decisions — whichever machine ran the script last won. That file is not merged by hand; it
+is regenerated.
+
+The rule, drawn where it is mechanical rather than taste-based:
+
+- **Runnable from anywhere, needs no repo context** → it is a *file*. `files/bin/foo` with
+  target `~/.local/bin/foo`. No new machinery, machine-scoped for free by package
+  selection, and works on Windows via MSYS2 `sh`. The user already invented this pattern:
+  `docs/cfg-bin/git`.
+- **Operates on the dotfiles repo itself** → a recipe in a `justfile` at the repo root.
+
+#### Why `just`, and why it is safe to depend on
+
+`just` is already in use — `.zsh/completions/_just` is tracked on `arch-wsl` and `just-lsp`
+is in the mason roster. `make` is present but is the wrong tool for non-build tasks
+(tab-sensitivity, everything `.PHONY`, no arguments); the existing four-line `docs/Makefile`
+is migrated and deleted. `mise` is installed on this host but appears nowhere in the corpus,
+and pulling in a tool-version manager to get a task runner is the larger dependency.
+
+The dependency is **soft by construction**: recipes are by definition never needed to
+deploy, so `bootstrap/` still installs only `git` + `dotter`. On a machine without `just`
+the fallback is reading one line out of the justfile. Verified here: `just` 1.45.0 supports
+`import? "file.just"` (optional import — no error when absent), so per-machine recipes are
+possible later without templating the justfile. Not built now; nothing needs it yet.
+
 ## Multi-target: dropped
 
 **Superseded by a clarified requirement.** Earlier drafts treated "one source, many
