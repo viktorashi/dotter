@@ -38,12 +38,25 @@ cherry-pick** (his fork predates upstream's `TaggedFilterer` → `GlobsetFiltere
 the conflict is entirely in filter construction). Re-implement the 12-line debounce by hand
 instead — snippet is in `docs/DESIGN.md` → *Recon log*.
 
-`[ ]` **First, test the better hypothesis.** That same commit also fixed globs
-(`{}/` → `{}/**`, `.git/` → `.git/**`, and `.replace('\\', "/")` for Windows paths).
-Current `src/watch.rs` still builds `format!("!{}/", opt.cache_directory.display())`, which
-on Windows yields `.dotter\cache` and cannot match a `/`-written glob. **If the cache is
-simply not being excluded on Windows, that is the real cause of #196** — a smaller, more
-correct fix than a debounce, and a better PR. Needs a Windows box to confirm.
+`[ ]` **Root cause found — fix the filter, not the symptom.** `src/watch.rs` passes its
+`!`-prefixed globs as `GlobsetFilterer::new`'s **`filters`** argument (2nd) while leaving
+**`ignores`** (3rd) empty. A leading `!` is a gitignore *negation*, so it registers as a
+whitelist; `filters.num_ignores()` is then `0`, and
+`watchexec-filterer-globset-8.0.0/src/lib.rs:176` skips the entire filter block. **Nothing
+is ever excluded.**
+
+Verified: reproduced the loop on both Linux (132 deploys) and Windows (33) by touching one
+file in `.dotter/cache`. Moving the globs to `ignores` without `!` removed the cache from
+the traced changed-file set.
+
+`[ ]` **Do not open the PR until a clean reproduction passes.** After the filter change some
+runs still looped, and three test-methodology flaws were found mid-investigation. Required
+before submitting:
+
+  - deploy target **outside** the watched tree
+  - `watch` log **outside** the watched tree
+  - identical results at `-v` and `-vvv` (they differed; investigate why)
+  - acceptance: **0 deploys** with no change, **exactly 1** per real source edit
 
 `[ ]` Add a duplicate-**target** assertion to the corpus. Verified footgun: two packages
 with different sources and the same target is *not* a config error — it fails at deploy
@@ -63,22 +76,25 @@ exactly where Developer Mode is locked down.
 `filesystem::symlinks_enabled` is false. Both are privilege-free; a hard link shares an
 inode, so round-trip is preserved.
 
-`[ ]` **Teach dotter to recognise its own hard links.** Verified **empirically**, not just
-from the code: deployed a symlink, replaced the target with a hard link to the same source
-(same inode), redeployed → `target already exists and isn't a symlink. Skipping.`
-`get_file_state` (`filesystem.rs:696`) detects links via `fs::read_link`, which **fails on a
-hard link**. The target then reads as `FileState::File(..)` and `compare_symlink`
-(`filesystem.rs:737`) falls to `_ => SymlinkComparison::TargetNotSymlink` — dotter treats
-its own link as a foreign file and skips it on every subsequent deploy.
+**Verified on real Windows 11, non-admin, Developer Mode OFF:** symlinks fail with
+"Administrator privilege required"; hard links and junctions both succeed. Real dotter on
+that box deployed a plain file as a *copy*.
 
-  - `[ ]` New `FileState` variant / `SymlinkComparison` arm for "target is the same file as
-    source"
-  - `[ ]` Same-file detection, platform-split: `st_dev`+`st_ino` (`std::os::unix::fs::MetadataExt`)
-    on unix; `dwVolumeSerialNumber` + `nFileIndex{High,Low}` from `GetFileInformationByHandle`
-    on Windows
-  - `[ ]` Extend `compare_symlink` to return `Identical` for it
-  - `[ ]` Check whether `read_link` succeeds on a junction (it is a reparse point) — verify,
-    do not assume
+`[ ]` **Directories — nearly free.** Verified: `fs::read_link` **succeeds** on a junction
+and returns exactly what `filesystem::real_path(source)` returns, so the existing
+`compare_symlink` already yields `Identical`. Only two things are needed: create a junction
+instead of a symlink, and stop routing directories into `desired_templates` when
+`symlinks_enabled` is false. **No comparison-logic changes.**
+
+`[ ]` **Files — real work.** Verified: `fs::read_link` on a hard link fails with OS error
+4390 ("not a reparse point"), so `get_file_state` returns `File(..)` and `compare_symlink`
+falls to `TargetNotSymlink`.
+
+  - `[ ]` Add a same-file check to `get_file_state` / `compare_symlink`
+  - `[ ]` **Use the `same-file` crate.** Verified that
+    `std::os::windows::fs::MetadataExt::file_index()` / `volume_serial_number()` are
+    **unstable** (`windows_by_handle`, rust-lang#63010) and do not compile on stable.
+    `same-file` returned correct results for hard links, junctions and unrelated files.
 
 `[ ]` Document the limits honestly: hard links require **same volume**; junctions are
 directory-only; fall back to copying when neither is possible.
@@ -86,8 +102,9 @@ directory-only; fall back to copying when neither is possible.
 `[ ]` Confirm `cache.toml` needs no format change (expected: none — undeploying a hard link
 is the same delete as a symlink).
 
-**Size: ~150-200 lines** across `filesystem.rs` and `deploy.rs`. Revised upward after
-reading `compare_symlink`; the original "swap the syscall" estimate was wrong.
+**Size:** smaller than the previous ~150-200 line estimate, because directories need no
+comparison changes. Realistically ~80-120 lines across `filesystem.rs`, `deploy.rs` and one
+new dependency.
 
 Must land **before** Phases 4/5, or their cost estimate is wrong.
 

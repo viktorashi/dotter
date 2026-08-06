@@ -872,9 +872,9 @@ changed `{}/` → `{}/**`, `.git/` → `.git/**`, and added
 ```
 
 On Windows `cache_directory.display()` yields `.dotter\cache`, which cannot match a glob
-written with `/`. **Hypothesis: the watch filter fails to exclude the cache on Windows,
-which is a plausible root cause of #196's infinite loop — possibly more so than the missing
-debounce.** Unverified: requires a Windows box. If true, the fix is smaller *and* more
+written with `/`. **Hypothesis (since DISPROVEN — see the Windows session below): the watch filter fails to
+exclude the cache on Windows specifically.** It fails on Linux too; the cause is not path
+separators but the `filters`-vs-`ignores` argument mix-up. If true, the fix is smaller *and* more
 correct than a debounce, and makes a better PR.
 
 ### New finding: target collisions are not caught at config time
@@ -892,6 +892,111 @@ composition is now the whole model, and composition means combining packages, **
 model's main footgun.** A `validate`/`doctor` check for duplicate targets would be cheap and
 genuinely useful — note it as a candidate, since the golden test corpus (Phase 0b) can
 assert it.
+
+### Windows session — all verified on a real box (WSL interop)
+
+Host: Windows 11 build 26100, **not administrator**, **Developer Mode OFF** — i.e. exactly
+the corporate worst case the plan targets. Reached from WSL2 via `powershell.exe`. Windows
+has its own Rust toolchain (cargo 1.97.1), so probes and dotter itself were built natively.
+
+**Link capability, measured:**
+
+| operation | result |
+|---|---|
+| `New-Item -ItemType SymbolicLink` (file) | **FAIL** — "Administrator privilege required for this operation." |
+| `New-Item -ItemType SymbolicLink` (directory) | **FAIL** — same |
+| `New-Item -ItemType HardLink` | **OK** |
+| `New-Item -ItemType Junction` | **OK** |
+
+Hard links and junctions are privilege-free on a locked-down box. Phase 1 is justified by
+measurement, not inference.
+
+**Real dotter, built and run on that box:**
+
+```
+[WARN] No permission to create symbolic links.
+       Proceeding by copying instead of symlinking.
+[INFO] [+] template "src/file.txt" -> "C:\Users\istan/deployed.txt"
+```
+
+A **plain, non-templated file** was deployed as a "template" (a copy). Confirms
+`deploy.rs:84` empirically.
+
+**The decisive probe** (Rust, built natively on Windows, mirroring
+`filesystem::get_file_state` and `filesystem::real_path`):
+
+```
+read_link(junction)  = Ok("C:\...\Temp\dotterprobe\srcdir")
+real_path(srcdir)    = Ok("C:\...\Temp\dotterprobe\srcdir")
+EQUAL? true  ->  compare_symlink would return Identical
+
+read_link(hardlink)  = Err(Os { code: 4390, "The file or directory is not a reparse point." })
+is_same_file(src, hardlink) = Ok(true)
+is_same_file(srcdir, junction) = Ok(true)
+```
+
+**This splits Phase 1 into two very different halves:**
+
+1. **Directories are nearly free.** A junction *is* a reparse point, so `fs::read_link`
+   succeeds on it and returns exactly what `real_path(source)` returns. Dotter's existing
+   `compare_symlink` would already call it `Identical`. Directories need only *creation*
+   plus bypassing the `symlinks_enabled` gate — **no comparison changes at all.**
+2. **Files need real work.** `read_link` fails on a hard link (OS error 4390), so
+   `get_file_state` reports `File(..)` and `compare_symlink` falls to `TargetNotSymlink`.
+   A same-file check must be added.
+
+**Use the `same-file` crate, not std.** `std::os::windows::fs::MetadataExt::file_index()`
+and `volume_serial_number()` are **unstable** (`windows_by_handle`, rust-lang#63010) — they
+fail to compile on stable. `same-file` (BurntSushi, used by ripgrep) is stable, tiny, and
+returned correct answers for hard links, junctions, and unrelated files.
+
+### #196 watch loop — root cause found in the filter, fix not fully established
+
+**Reproduced on both platforms.** Touching a single file inside `.dotter/cache` produced 33
+deploys on Windows and 132 on Linux. It is not Windows-specific, which kills the earlier
+backslash hypothesis recorded above.
+
+**Root cause of the filter being inert — certain.** `watchexec-filterer-globset` 8.0.0:
+
+```rust
+pub async fn new(
+    origin, filters, ignores, whitelist, ignore_files, extensions
+) -> Result<Self, Error>
+```
+
+`src/watch.rs` passes the `!`-prefixed globs as **`filters`** (arg 2) and leaves `ignores`
+(arg 3) empty. Both lists are fed to a `GitignoreBuilder`, where a leading `!` is a
+*negation* and registers as a whitelist, not an ignore. Then at `lib.rs:176`:
+
+```rust
+if self.filters.num_ignores() > 0 { /* run the filters */ }
+```
+
+With only negated lines, `num_ignores()` is **0**, so the whole filter block is skipped and
+**nothing is ever excluded.**
+
+Moving the globs to `ignores` and dropping the `!` demonstrably worked: `.dotter/cache`,
+`.dotter/cache/src/tmpl.conf` and `.dotter/cache.toml` disappeared from the traced
+changed-file set.
+
+**Not established: whether that alone fixes #196.** After the change, some runs still
+looped. Three separate test-methodology flaws were found and corrected mid-investigation,
+and the results did not stabilise before the session ended. Treat the filter bug as proven
+and the end-to-end fix as **open**.
+
+> **Test methodology warnings — all three of these produced false conclusions here:**
+> 1. The **deploy target must be outside the watched tree.** Deploying into `./home` makes
+>    every deploy retrigger the watcher. This is inherent, not a bug.
+> 2. The **log file must be outside the watched tree.** Redirecting `watch -v` output into
+>    the repo does the same thing.
+> 3. **Verbosity changes the outcome.** `-v` and `-vvv` gave different deploy counts on
+>    otherwise identical runs, suggesting a timing or event-queue interaction. Investigate
+>    this before trusting any measurement.
+
+**Consequence for the plan:** the Phase 0b probe PR is *better* than a debounce — it is a
+real, cross-platform, root-caused bug in a currently-inert feature — but it is **not yet a
+finished patch**. Do not open it until a clean reproduction passes: zero deploys with no
+change, exactly one deploy per real source edit, target and logs both outside the tree.
 
 ### Still unverifiable here
 
