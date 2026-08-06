@@ -139,8 +139,10 @@ Windows behaviour "unverifiable".
   invoke `cargo` through `powershell.exe`. A full release build takes ~8 minutes.
 - The box is **not administrator** and has **Developer Mode OFF** — the exact corporate
   worst case, which makes it the ideal Phase 1 test target.
-- `docker` is installed but the **daemon is not reachable**, so the `pacman`/`apt`/`dnf`
-  branches of `bootstrap/install.sh` remain unexercised.
+- `docker` works. The `bootstrap/install.sh` package-manager dispatch is verified across
+  arch/debian/fedora/alpine/opensuse — see `docs/DESIGN.md`. Note that a **corporate
+  TLS-inspecting proxy** (`STRATEC-Chain.pem`) makes `pacman` and `dnf` fail against their
+  mirrors from inside a container; that is the environment, not the script.
 - No `pwsh` (PowerShell 7) — `bootstrap/install.ps1` is still unlinted; Windows PowerShell
   5.1 is what is present.
 

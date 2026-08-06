@@ -1116,6 +1116,36 @@ No Windows machine and no container runtime on this host:
 
 These need a real Windows box or a CI runner. **Do not write them up as verified.**
 
+### `bootstrap/install.sh` package-manager dispatch — verified in containers
+
+Docker, 2026-08. Dispatch order `pacman → apt-get → dnf → zypper → apk` selects correctly
+on every image tested:
+
+| image | branch taken |
+|---|---|
+| `archlinux:base` | `pacman` |
+| `debian:stable-slim` | `apt-get` |
+| `fedora:latest` | `dnf` |
+| `alpine:latest` | `apk` |
+| `opensuse/tumbleweed` | `zypper` |
+
+Full `install git` executed end-to-end on **debian** (git 2.47.3) and **alpine**
+(git 2.54.0).
+
+**Arch and Fedora could not complete the install here, and it is not a script defect.**
+This host sits behind a TLS-inspecting corporate proxy (`STRATEC-Chain.pem` in
+`/usr/local/share/ca-certificates/`), and both `pacman` and `dnf` reject the intercepted
+mirror with *"self-signed certificate in certificate chain (19)"*. Mounting the corporate
+root into the container trust store and running `update-ca-trust` did **not** fix it, so
+the interception is deeper than the CA bundle. Debian and Alpine were unaffected — their
+mirrors are evidently not intercepted.
+
+Worth carrying into the bootstrap design rather than filing away: a corporate TLS proxy
+breaks `curl | sh` and every native package install *before* dotter is ever reached. The
+user's own dotfiles already contain `docs/startup-scripts/setup-certficates.sh`, which
+confirms this is a lived problem on their machines, not a container artifact. `install.sh`
+should fail with a message naming the CA, not with a raw curl error.
+
 ## Cherry-picks from forks and open PRs
 
 Audited via the GitHub API, 2026-08. Of dotter's **75 forks, 7 are ahead of upstream**; of
