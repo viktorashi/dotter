@@ -43,6 +43,112 @@ What is missing is everything after detection. Open, unimplemented:
 - dotter#186 "symlink config to multiple locations" — *"pretty highly requested...
   I'm welcoming PRs on this :)"*. **Not our problem** — see *Multi-target: dropped*.
 
+## Measured: what drift actually looks like
+
+`github.com/viktorashi/dotfiles`, five branches, measured 2026-08. This is the corpus
+Phase 0a ports, and it is also the evidence for every claim in the vision statement.
+
+### The current model, and why every symptom follows from it
+
+```sh
+# docs/conf.sh — the entire deployment mechanism
+export git_dir="$HOME/.cfg/"
+conf() { git --git-dir="${git_dir}" --work-tree="$HOME" "$@"; }
+```
+
+A bare repo with `--work-tree=$HOME`. **The repo *is* `$HOME`.** Three consequences, all
+observed in the corpus:
+
+1. A file's destination is structurally fixed at `$HOME/<path-in-repo>`. There is no
+   indirection, so *the only way to express a per-machine difference is a branch*.
+2. Anything outside `$HOME` cannot be represented. Hence the hand-written
+   `docs/linkables/link_them.sh` — one `sudo ln -s` for `/etc/mc/mc.vim.keymap`.
+3. A Windows path that is not a `$HOME` mirror cannot be represented either. Hence
+   `docs/startup-scripts/link-nvim.ps1`: **90 lines of PowerShell to junction one
+   directory**, `AppData\Local\nvim` → `.config\nvim`, plus a `.bat` twin of the same
+   thing. It opens with `#Requires -RunAsAdministrator`, which our own recon proves is
+   *not needed* — junctions do not require elevation, only symlinks do (see *Recon log*).
+
+Every one of these is a workaround for the missing indirection, and all three disappear
+the moment a target path is a config value.
+
+### Branch topology
+
+| branch | files | ahead of `main` | behind `main` | last commit |
+|---|---|---|---|---|
+| `main` | 51 | — | — | — |
+| `arch-wsl` | 94 | 372 | 18 | 2026-07-29 |
+| `leanoox` | 94 | 372 | 18 | 2026-07-29 |
+| `mac` | 89 | 198 | 22 | 2026-07-24 |
+| `windows10` | 60 | 156 | 19 | 2026-07-01 |
+
+**`main` is not a base.** It is behind every machine branch by 156–372 commits while
+carrying 18–22 they never got. It is a stale sixth machine wearing the name of a trunk.
+
+**`arch-wsl` and `leanoox` are byte-identical** — `git diff` between them is empty. Two
+branches, two machines, zero divergence. Under composition they are one machine file each,
+both selecting the same layers, and the duplication cost is zero.
+
+### The decisive measurement
+
+For every file that differs between `arch-wsl` and `windows10`, classify each changed line
+by whether it mentions anything OS-shaped (`windows|wsl|darwin|brew|pacman|apt|scoop|
+AppData|USERPROFILE|.exe|/mnt/c|uname|msys|cygwin`):
+
+| | lines |
+|---|---|
+| changed between the two branches | **1478** |
+| of those, OS-flavoured | **29 (2.0%)** |
+| of those 29, inside `docs/README.md` | 17 |
+| genuinely OS-specific config content | **~11 lines**, in `.zshrc`, `docs/shared.sh`, `keymaps.lua` |
+
+**98% of two years of branch divergence is accidental drift.** Not one line of it was a
+decision.
+
+Two representative examples, both classified BOTH-CHANGED by 3-way merge, both with zero
+OS content:
+
+- `.config/nvim/lua/plugins/neogit.lua` — `windows10` is missing 5 lines of optional
+  plugin dependencies. Nobody chose that.
+- `.config/nvim/lua/plugins/mason.lua` — `arch-wsl` added `ruff`, `pyrefly`, `just-lsp`,
+  `tree-sitter-cli`, `lemminx`, `xmlformatter`; `windows10` has `black`, `eslint-lsp`,
+  `pyright` that `arch-wsl` dropped. Two divergent LSP rosters, arrived at by nobody.
+
+This is *exactly* the failure mode the tagline names, and it is the reason branch
+classification (Phase 5) has to be conservative: on this corpus a classifier that
+over-reports machine-specific costs almost nothing, because there is almost nothing
+machine-specific to find.
+
+### What is genuinely machine-exclusive
+
+Real, and easily expressed as a machine-selected package:
+
+- **windows10 only** — `auto-hotkey/` (incl. a committed `.exe`), `docs/vindovs/`
+  (Windows Terminal settings, msys2 profile/conf/nsswitch, WSL vhdx shrink,
+  startup-app management), `security-crypto/*.ps1` (Authenticode signing),
+  `.bash_profile` (msys), LaTeX/snippet nvim plugins.
+- **linux only** — `.config/systemd/user/` units, `/etc/mc/mc.vim.keymap`.
+
+Roughly **15 files of a 94-file tree** are truly machine-bound. Everything else in the
+"only on one branch" lists (`.config/opencode/`, `.agents/`, `.codex/`, `.ssh/config`,
+`.config/tmux/`, `.gnupg/`, half the nvim plugins) is drift: `windows10`'s branch tip is
+four weeks older, so it simply never received them.
+
+### What this corpus decides
+
+- **Composition is sufficient.** ~15 exclusive files and ~11 divergent lines is a machine
+  file plus one or two conditionals. Nothing here needs multi-target, confirming
+  *Multi-target: dropped*.
+- **Phase 1 is load-bearing, and it is the first thing the user will feel.** The junction
+  script exists, is hand-written per file, demands admin it does not need, and covers
+  exactly one directory. Phase 1 replaces it with a config line and no elevation.
+- **Phase 2 (`${var}` in target paths) is what kills the `$HOME`-mirror constraint** —
+  it is the indirection whose absence produced all three workarounds above.
+- **Templating is barely needed.** ~11 lines across three files. Port with composition
+  only (Phase 0a says exactly this) and add templates only where the measurement demands.
+- **Phase 5 has a ready-made test set**: the 1478/29 split is ground truth. A classifier
+  run over these branches should recover ≈29 candidate lines, not 1478.
+
 ## Prior art: nobody shipped this
 
 Fork audit (GitHub API, 2026-08):

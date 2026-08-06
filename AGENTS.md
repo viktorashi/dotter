@@ -104,8 +104,19 @@ bootstrap/        install.sh, install.ps1, router.js  — fork-only, never upstr
 src/              dotter itself
 ```
 
-Branch `viktorashi` is the fork's working branch and carries all of the above. Upstream
-branches are cut fresh from `origin/master` and contain **only** `src/` + `tests/`.
+### Branches
+
+Branch `viktorashi` is the fork's working branch and carries all of the above.
+
+**No PR is ever opened from `viktorashi`.** Every upstream PR gets its own `up/NN-topic`
+branch, cut fresh from `origin/master`, carrying **only** `src/` + `tests/` and exactly one
+reviewable concern. They are cut independently of each other, so they review and merge in
+parallel rather than blocking on the slowest link. Full list and the per-PR rules:
+`docs/DESIGN.md` → *Upstreaming strategy* → *Stacked PRs*.
+
+`viktorashi` is where the work is developed; `up/*` is where a single extracted slice of it
+is presented. The two are not the same commit, and the fork's `docs/`, `bootstrap/` and this
+file never appear upstream.
 
 ## Current state
 

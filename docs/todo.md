@@ -10,31 +10,59 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` dro
 
 ## Phase 0a — port the dotfiles using only what ships today
 
-**Input**: `github.com/viktorashi/dotfiles` (default branch `main`). **Not cloned on this
-host** — clone it first; nothing in this phase can start without it.
+**Input**: `github.com/viktorashi/dotfiles`, five branches. **Already measured** — the
+numbers, the topology and what they decide are in `docs/DESIGN.md` → *Measured: what drift
+actually looks like*. Read that section before touching anything here; it is the
+justification for the whole plan.
 
-The five branches are the machine entities to be collapsed into one tree:
+Headline results, so this phase is actionable without re-measuring:
 
-| branch | becomes |
-|---|---|
-| `main` | the shared base / layers |
-| `arch-wsl` | `.dotter/machines/arch-wsl.toml` |
-| `leanoox` | `.dotter/machines/leanoox.toml` |
-| `mac` | `.dotter/machines/mac.toml` |
-| `windows10` | `.dotter/machines/windows10.toml` |
+- Deployment today is a bare repo with `--work-tree=$HOME`, so **the repo is `$HOME`** and
+  a destination cannot be chosen. That single constraint produced every workaround in the
+  tree.
+- `main` is **not** a base — it is behind every machine branch by 156–372 commits. Do not
+  treat it as the shared layer; build the shared layer from what the machine branches
+  *agree* on.
+- `arch-wsl` and `leanoox` are **byte-identical**. Two machine files, same layers.
+- **98% of the divergence is drift** (1478 changed lines between `arch-wsl` and
+  `windows10`; 29 OS-flavoured; ~11 genuinely OS-specific once the README is excluded).
+- **~15 files of 94 are truly machine-bound** (`auto-hotkey/`, `docs/vindovs/`,
+  `security-crypto/*.ps1`, `.bash_profile` on Windows; `.config/systemd/user/` and
+  `/etc/mc/mc.vim.keymap` on Linux).
 
-`[ ]` Clone the repo and diff the four machine branches against `main` — that diff *is* the
-per-machine divergence, and it is what the machine files must encode.
+`[ ]` Design the target tree **from the dotter model, not from the current repo layout.**
+The existing structure is shaped by the `$HOME`-mirror constraint, which this fork removes.
+Where the current tree only looks the way it does because a destination could not be
+expressed, do not carry the shape over. Specifically:
+
+  - `docs/startup-scripts/link-nvim.{ps1,bat}` — 90 lines of PowerShell + a `.bat` twin,
+    junctioning one directory, demanding admin it does not need. **Delete both**; Phase 1
+    plus a machine file replaces them.
+  - `docs/linkables/link_them.sh` — one `sudo ln -s` into `/etc`. **Delete**; dotter has
+    `owner = "root"`.
+  - `docs/` currently mixes real config, one-shot setup scripts and dead `legacy-shi/`.
+    Split deliberately; do not port it as one blob.
+
+`[ ]` Reconcile the drift **first, as its own commit, before any dotter config exists.**
+The 1478-line divergence is not machine-specific and must not be encoded as if it were.
+Pick a winner per file (usually the newest branch), and only what survives that pass is
+eligible to become a machine difference. Skipping this step bakes two years of accident
+into the new structure permanently.
 
 `[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
 composition only, **zero content templates**. Select with `-l` for now (the `machine`
 pointer does not exist yet).
 
 `[ ]` Count the files that genuinely need *intra-file* variation which no app-native
-`include` directive can absorb.
+`include` directive can absorb. Expected from the measurement: **~3** (`.zshrc`,
+`docs/shared.sh`, `.config/nvim/lua/config/keymaps.lua`).
 
 **This number gates Phases 4 and 5.** If it is zero, the reverse-sync machinery has no
 users and must not be built. Nothing downstream is justified until this is measured.
+
+`[ ]` Keep the pre-port branches reachable (tag them). Phase 5's classifier needs them as
+ground truth: a run over `arch-wsl` vs `windows10` should surface ≈29 candidate lines, not
+1478.
 
 ---
 
