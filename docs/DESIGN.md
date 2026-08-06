@@ -1,8 +1,8 @@
 # Dotter fork: design
 
-Goal: a dotfile manager where (a) one source can declare **all** its destinations in one
-place, next to that source, and (b) when an app rewrites its own config in place, that edit
-finds its way home instead of being lost or clobbered.
+Goal: a dotfile manager where **configs do not drift across machines** — one tree, every
+machine, no per-machine branches — and where an app rewriting its own config in place has
+that edit find its way home instead of being lost or clobbered.
 
 Everything here is additive. Existing `global.toml` / `local.toml` must keep working
 unchanged.
@@ -41,7 +41,7 @@ What is missing is everything after detection. Open, unimplemented:
 - dotter#193 "offer to launch a merge tool when target contents were changed" —
   **zero maintainer response**
 - dotter#186 "symlink config to multiple locations" — *"pretty highly requested...
-  I'm welcoming PRs on this :)"*
+  I'm welcoming PRs on this :)"*. **Not our problem** — see *Multi-target: dropped*.
 
 ## Prior art: nobody shipped this
 
@@ -263,22 +263,24 @@ may still use env expansion — `${APPDATA:-/nonexistent}` already works today.
 A content template that genuinely needs live env opts out of classification and always
 routes to manual conflict. Acceptable degradation.
 
-## Two orthogonal mechanisms (they do not compete)
+## Composition is the whole model
 
-Earlier drafts here swung between a machine table with `inherits`, then
-`[settings.variants]` axes branched on with `{{#if}}`, then composition-replaces-everything.
-All three were confused, because they conflated two genuinely separate questions:
+Earlier drafts swung between a machine table with `inherits`, then `[settings.variants]`
+axes branched on with `{{#if}}`, then a multi-target array as the primary mechanism. All
+were wrong, for the same reason: they invented a schema for something dotter already
+does.
 
-| question | mechanism | notes |
-|---|---|---|
-| **Where does this file go?** | **multi-target** (below) | co-located with the source, per the founding requirement |
-| **Which files exist here, and what is in them?** | **composition** — packages, includes, machine files | dotter already implements this |
+One mechanism answers all three questions:
 
-They are complementary. Multi-target answers *destination*; composition answers *existence*
-and *content*. Neither subsumes the other, and the founding complaint — "I want to define
-where the files go in some file, for each file" — is answered only by multi-target.
-Expressing destinations as per-machine overrides scattered across machine files is exactly
-the split that was rejected as ugly at the outset.
+| question | answered by |
+|---|---|
+| **Which files exist on this machine?** | packages selected in the machine file |
+| **Where does this file go here?** | `[files]` override, or a variable in the target (PR #190) |
+| **What is in it?** | variables, app-native `include` directives, templating as last resort |
+
+**`[settings.variants]` is dropped** — it existed only to enumerate branch values for
+classification, which is now gated on there being any templates at all. If Phase 0a finds
+none, it is never needed. If it does, reintroduce it then, scoped to the residual set.
 
 ### Composition: what dotter already does
 
@@ -362,58 +364,62 @@ variation.
 **This argument has a hard dependency on symlinks actually being available — see
 "Windows linking" below, where it currently fails.**
 
-## Multi-target
+## Multi-target: dropped
 
-**This is the founding requirement.** The original problem statement was: *"I want to
-define where the files go in some file (probably TOML) for each file"* — all destinations
-for a source, co-located with that source. Nothing else in this document replaces it.
+**Superseded by a clarified requirement.** Earlier drafts treated "one source, many
+targets" as the founding need, on the strength of the original complaint that destinations
+should be declared together rather than scattered.
 
-`FileTarget` is already an untagged serde enum (`config.rs:48-55`), so adding a variant is
-**fully backwards compatible** — every config that parses today still parses.
+The clarification that kills it:
+
+> *"I'm not gonna link the same files in multiple places on the same machine. Just in
+> different places on different machines."*
+
+Simultaneous multi-target — one source deployed to two locations **at once, on one
+machine** — is #186's case (`pwsh` → both `Documents\PowerShell` and
+`Documents\WindowsPowerShell`). It is not a requirement here and never was.
+
+What is actually needed is *different destinations on different machines*, which is
+**exactly one target per machine**. `FileTarget` already expresses that. No schema change,
+no `FileTarget::Many`, no `cache.toml` migration, no #186.
+
+### The co-location objection, resolved
+
+The original complaint stands: with composition, a destination lives in a machine file
+rather than beside its source. But that is a **transposition**, not a loss — the same
+facts, indexed differently:
+
+| indexed by | easy to answer | hard to answer |
+|---|---|---|
+| **source** (multi-target array) | "where does `nvim` go everywhere?" | "what is different about `win-work`?" |
+| **machine** (composition) | "what is different about `win-work`?" | "where does `nvim` go everywhere?" |
+
+Given the vision is *configs must not drift across machines*, the question that matters is
+the second one — **what does this machine diverge on** — and a machine file answers it by
+construction: every divergence for that machine is in one place, reviewable in one diff.
+The by-machine index is the better fit for the actual goal.
+
+### Recovering most of the co-location anyway: upstream PR #190
+
+`balthild:master` — *"Expand variables in target paths"*, +106/-13, `src/config.rs` only,
+closes #61, **open and unreviewed since 2024-11-06**.
+
+With it, targets can reference variables:
 
 ```toml
-"nvim" = [
-  { target = "~/.config/nvim",                     if = "(eq distro \"arch\")" },
-  { target = "${LOCALAPPDATA:-/nonexistent}/nvim", if = "dotter.windows" },
-]
+# global.toml — destination stays next to the source
+"nvim"                 = "{{ config_dir }}/nvim"
+"vscode/settings.json" = "{{ config_dir }}/Code/User/settings.json"
 ```
 
-One feature, two jobs, decided by how many conditions hold:
+```toml
+# .dotter/machines/win-work.toml — one line covers every file above
+[variables]
+config_dir = "${APPDATA:-/nonexistent}"
+```
 
-- **exactly one true** → a per-machine destination. This is the `nvim` / `vscode` case, and
-  the reason this project exists.
-- **more than one true** → genuinely simultaneous targets. This is #186's actual case
-  (`pwsh` → both `Documents\PowerShell` and `Documents\WindowsPowerShell`).
-
-Both fall out of the same implementation; neither needs special handling.
-
-> **The upstream expansion-before-`if` bug bites here.** `shellexpand::full` runs over every
-> target at `config.rs:186-198`, *before* `filter_files_condition` (`handlebars_helpers.rs:27`,
-> reached from `deploy.rs:42`). So `${LOCALAPPDATA}` in a Windows-only entry crashes config
-> loading on Linux even though the `if` would have dropped it. Verified. Until that is fixed
-> upstream, **every env var in a target must carry a `:-fallback`** — `${LOCALAPPDATA:-/nonexistent}`.
-> The default suppresses the lookup error (verified in `shellexpand-2.1.2/src/lib.rs:452-492`;
-> the split token is `:-`, not `:`).
-
-The diff engine is **already pair-keyed** — `deploy.rs:265-285` collapses to
-`BTreeSet<(PathBuf, PathBuf)>` before diffing. Only three declarations assume one-to-one:
-
-- `Files = BTreeMap<PathBuf, FileTarget>` (`config.rs:74`)
-- `Cache { symlinks: BTreeMap<PathBuf,PathBuf>, templates: ... }` (`config.rs:210`)
-- `desired_symlinks: BTreeMap<PathBuf, SymbolicTarget>` (`deploy.rs:80`)
-
-plus `.remove(source)` at `deploy.rs:293,305,325,347` must become target-aware.
-
-**The one real break is `cache.toml`.** It is generated, never hand-authored, so: add a
-`version` field defaulting to 0 and migrate on read.
-
-**Semantics that must be pinned down** (SuperCuber's two stated blockers on #186 — having
-crisp answers here is most of what gets it merged):
-
-- `target = ""` disables a file. With an array: whole-value `""` disables everything;
-  individual entries carry their own `if` instead.
-- local.toml overriding a source key **replaces the entire array**, not element-wise.
-  Predictable, and matches existing override semantics.
+That collapses N per-file overrides into **one variable per machine**, which is the real
+DRY win and most of what co-location was ever worth. See *Cherry-picks* below.
 
 ## Windows linking: the fallback that does not exist
 
@@ -712,6 +718,49 @@ dotter setup-git → git config rerere.enabled true
 
 Fresh system → `dotter deploy` → one prompt → configured.
 
+## Cherry-picks from forks and open PRs
+
+Audited via the GitHub API, 2026-08. Of dotter's **75 forks, 7 are ahead of upstream**; of
+rotz's 13, 2 are. Sizes and touched files are measured, not estimated.
+
+### Take
+
+| what | source | size | why |
+|---|---|---|---|
+| **Watch debounce** | `Juemuren/dotter` — *"Add debounce to prevent infinite loops when watch"* | **+21/-3**, `src/watch.rs` | Closes open issue **#196** (watch + post-deploy hook infinitely recurses). Not our code, near-zero risk. Doubles as the probe PR that measures the maintainer's response time. |
+| **Variables in target paths** | upstream PR **#190** (`balthild:master`), open since 2024-11-06, zero reviews | **+106/-13**, `src/config.rs` | Closes #61. Collapses N per-file destination overrides into one variable per machine — recovers most of the co-location the multi-target array was going to provide. Cherry-pick into the fork; do **not** re-open it upstream, that duplicates a PR already rotting. |
+| **Recursing for template targets** | `faffeldt/dotter` — *"Allow recursing for template target"* | **+43/-0**, `src/config.rs` | Templated directories currently cannot recurse the way symlinked ones do. Only matters if Phase 0a finds a non-zero residual templated set. |
+
+### Watch, do not take yet
+
+| what | source | size | note |
+|---|---|---|---|
+| `copy` deployment type with checksum caching | PR **#214** (JP-Ellis), 2026-04 | +1205/-10, 7 files | Overlaps the Windows-linking work: both concern what to do when a symlink is impossible. Hard links are the better answer (round-trip preserved), but the checksum-cache machinery here may be reusable. Read before writing Phase 1. |
+| Elevate permissions on directory access | PR **#215** (archnode), 2026-05 | +822/-86, 5 files | Relevant to `/etc` targets with `owner = "root"`. Large; wait and see if it lands upstream. |
+| Recursive off by default for symbolic folders | PR **#206** (Faria22), 2025-12 | +59/-2, `src/config.rs` | Behaviour change — would alter deploy semantics under us. Track it. |
+| `exclude` function | PR **#216** (haojunyu), 2026-06 | +308/-3, 3 files | Unrelated to this plan, but touches `config.rs` and would conflict with `up/02-machine`. |
+
+### Skip, with reasons
+
+- **`einetuer/dotter`** — feature flags for `scripting`/`watch`. **Already upstream**:
+  `Cargo.toml:34-37` has `default = ["scripting", "watch"]`. Redundant.
+- **`orhun/dotter`** — Linux ARM build CI, `dtolnay/rust-toolchain`, `cross`. Release
+  infrastructure only; upstream already ships `dotter-linux-arm64-musl`. No source value.
+- **`jayvicsanantonio/dotter`** — dependabot bumps only.
+- **`monomadic/dotty`** — a divergent rename, not a fork to merge from. macOS CI only.
+- **rotz `bltavares` (+9)** — his five ignored PRs (clippy, dep bumps, Android binaries,
+  `dirs.base.data_local`). Wrong project; the `data_local` one is already implemented at
+  `rotz/src/templating/mod.rs:85` despite PR #415 claiming to add it.
+- **rotz `kaerum` (+1)** — trivial.
+
+### Ideas taken from other projects, not code
+
+- **rotz** — `junction::create` for privilege-free Windows directory links, and hard links
+  for files. The approach, reimplemented; not the code (different codebase, different
+  licence surface).
+- **`mermonia/peridot`** (Go, 0★) — render to an artifact dir and symlink the artifact, so
+  the deployed file stays a link. One idea, no code.
+
 ## Upstreaming strategy
 
 Maintainer record (GitHub API, 2026-08): small obviously-correct PRs merge same-day
@@ -732,11 +781,13 @@ unit:
 
 ```
 origin/master
-  └── up/00-tests          golden config fixtures            (pure addition, zero risk)
-       └── up/01-winlink   hard link + junction fallback     (bug fix, self-contained)
-            └── up/02-multitarget   FileTarget::Many + cache v1 migration
-                 └── up/03-machine  `machine` pointer field  (depends on nothing above)
+  ├── up/00-tests     golden config fixtures + watch debounce (#196)   pure addition
+  ├── up/01-winlink   hard link + junction fallback                    bug fix
+  └── up/02-machine   `machine` pointer field                          small feature
 ```
+
+All three are cut **independently from `origin/master`** — none depends on another, so they
+review and merge in parallel. Everything else stays in the fork.
 
 Rules a fresh implementer must follow:
 
@@ -749,12 +800,13 @@ Rules a fresh implementer must follow:
 3. **No `docs/`, no `TODO.md`, no `AGENTS.md`, no `bootstrap/`** in any upstream branch.
    Strip them; they are fork identity, not upstream value.
 4. **Every PR closes or references an existing issue** where one exists — #196 (watch
-   recursion), #186 (multi-target), #193 (merge tool), #51 (reverse sync). An unrequested
+   recursion), #193 (merge tool), #51 (reverse sync). An unrequested
    feature is a much harder sell than an answer to a filed request.
-5. **Answer the maintainer's stated objection in the PR body.** For #186 he named two
-   blockers (TOML forbids duplicate keys; `target = ""`-disable and local-override
-   semantics must keep working). A PR that pre-empts both reads as considerate; one that
-   ignores them reads as work for him.
+5. **Answer the maintainer's stated objection in the PR body.** He names blockers
+   explicitly when he has them — on #186 it was two (TOML forbids duplicate keys;
+   `target = ""`-disable and local-override semantics must survive). Search the issue for
+   his own words and pre-empt them; that reads as considerate, ignoring them reads as work
+   for him.
 6. **Squash before opening.** One commit, imperative subject, body explaining *why*.
 7. **Never break `cache.toml` without a version + migration.** It is generated, so
    migration is cheap and its absence is an instant rejection.

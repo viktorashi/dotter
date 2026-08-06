@@ -12,9 +12,9 @@ Things that stay true regardless of implementation:
 - **One tree, all machines.** Git branches per machine are the thing being replaced — you
   are permanently checked out on one, so every machine drifts while sharing most of its
   functionality.
-- **Destinations are declared next to their source.** All targets for a file live together,
-  in TOML. Scattering them across per-machine files is the design that was rejected at the
-  outset.
+- **A file goes to exactly one place per machine** — different places on different
+  machines, never two places at once. Destinations may be indexed by machine rather than by
+  source; what matters is that every divergence for a machine is visible in one diff.
 - **A machine is an entity, not a set of flags.** It composes layers it mostly shares with
   other machines.
 - **Live edits must survive.** Apps rewrite their own configs — increasingly so, especially
@@ -92,6 +92,8 @@ What follows from that:
 - For anything he has personally given up on (#51), a **working demo beats a design doc**.
 
 Full branch layout and the fork-only list are in `docs/DESIGN.md` → *Upstreaming strategy*.
+What to cherry-pick from the 7 diverged forks and the 5 open upstream PRs — and what to
+deliberately skip — is in `docs/DESIGN.md` → *Cherry-picks from forks and open PRs*.
 
 ## Repo layout
 
