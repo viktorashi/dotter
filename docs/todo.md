@@ -338,7 +338,8 @@ enforceable rather than merely conventional (`docs/DESIGN.md` → *Imperative se
   - every path under `files/` appears as a source key in the merged config (else it is
     deployed nowhere and is silently dead);
   - no path under `scripts/` appears as a source key;
-  - every `scripts/<name>/` matches a declared package name (else it silently never runs).
+  - every `scripts/<name>/` matches a declared package (`undeploy/` is a reserved
+    subdirectory name, not a package) name (else it silently never runs).
     Note a script-only package is legal — `Package.files` is `#[serde(default)]`, verified —
     so `certs` may declare zero files;
   - **for every deployed directory, target-side files with no source entry.** Expanded
