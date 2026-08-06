@@ -108,9 +108,11 @@ src/              dotter itself
 
 Branch `viktorashi` is the fork's working branch and carries all of the above.
 
-**No PR is ever opened from `viktorashi`.** Every upstream PR gets its own `up/NN-topic`
-branch, cut fresh from `origin/master`, carrying **only** `src/` + `tests/` and exactly one
-reviewable concern. They are cut independently of each other, so they review and merge in
+**No PR is ever opened from `viktorashi`.** Every upstream PR gets its own branch, cut
+fresh from `origin/master`, carrying **only** `src/` + `tests/` and exactly one reviewable
+concern. Name it `up/<what-it-does>` — succinct and descriptive, never numbered: the
+branches are independent, so a number would imply an order that does not exist
+(`up/watch-filter`, `up/windows-link-fallback`, `up/machine-field`). They are cut independently of each other, so they review and merge in
 parallel rather than blocking on the slowest link. Full list and the per-PR rules:
 `docs/DESIGN.md` → *Upstreaming strategy* → *Stacked PRs*.
 

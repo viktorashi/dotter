@@ -49,6 +49,21 @@ Pick a winner per file (usually the newest branch), and only what survives that 
 eligible to become a machine difference. Skipping this step bakes two years of accident
 into the new structure permanently.
 
+`[ ]` Adopt the two-root layout — `files/` for anything placed somewhere, `scripts/<package>/`
+for anything executed. Rationale, the failure modes each one has, and the verified hook
+dispatcher are in `docs/DESIGN.md` → *Imperative setup*. The dispatcher needs **no dotter
+source change**; write `.dotter/post_deploy.sh` as the template shown there and it works
+today.
+
+`[ ]` Convert the existing imperative scripts into `scripts/<package>/` entries. From the
+corpus these are `docs/startup-scripts/setup-certficates.sh` (→ `scripts/certs/`),
+`docs/git-settings.sh`, `docs/startup-scripts/install-init-stuff.sh`,
+`docs/vindovs/manage-startup-apps.ps1`. Each must be **idempotent** — they run on every
+deploy.
+
+`[ ]` Note which of `docs/` is neither: `docs/cfg-bin/git` is a wrapper meant to be on
+`PATH`, so it is a `files/` entry, not a script. `docs/legacy-shi/` is dead — delete it.
+
 `[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
 composition only, **zero content templates**. Select with `-l` for now (the `machine`
 pointer does not exist yet).
@@ -60,13 +75,19 @@ pointer does not exist yet).
 **This number gates Phases 4 and 5.** If it is zero, the reverse-sync machinery has no
 users and must not be built. Nothing downstream is justified until this is measured.
 
+`[ ]` **Produce a review list, do not decide alone.** Most of the 1478 lines reconcile
+mechanically (take the newest branch). Some do not — `mason.lua`'s two divergent LSP
+rosters is the known example, where both sides added tools deliberately. Collect every such
+file into a single diff for the user to adjudicate. Explicitly deferred by the user: *"what
+cannot be easily reconciled from my config you give to me to look at, but not right now."*
+
 `[ ]` Keep the pre-port branches reachable (tag them). Phase 5's classifier needs them as
 ground truth: a run over `arch-wsl` vs `windows10` should surface ≈29 candidate lines, not
 1478.
 
 ---
 
-## Phase 0b — golden config test corpus  → upstream `up/00-tests`
+## Phase 0b — golden config test corpus  → upstream `up/config-tests`
 
 `[ ]` Add `tests/` with fixture configs asserting merged output.
 
@@ -76,6 +97,12 @@ bumps verbosity (`args.rs:123`); there is no validate-only path.
 A `validate` subcommand risks rejection as redundant with `--dry-run`. A golden-file corpus
 is pure addition, zero risk, and is the backwards-compatibility proof every later phase
 depends on.
+
+### Split out: `up/watch-filter` — one concern, its own branch
+
+The watch fix below is a **bug fix, not a test addition**. It goes on its own branch,
+`up/watch-filter`, cut from `origin/master`, closing #196. Bundling it with the test corpus
+would violate one-concern-per-PR and drag a same-day-bucket fix behind a larger change.
 
 `[ ]` **Probe PR — #196 watch recursion.** Verified: the Juemuren commit **does not
 cherry-pick** (his fork predates upstream's `TaggedFilterer` → `GlobsetFilterer` migration;
@@ -109,7 +136,7 @@ edge.
 
 ---
 
-## Phase 1 — Windows hard link + junction fallback  → upstream `up/01-winlink`
+## Phase 1 — Windows hard link + junction fallback  → upstream `up/windows-link-fallback`
 
 **Highest-value item in the plan.** `deploy.rs:67-84` currently converts *every* file to a
 rendered copy when symlinks are unavailable — so on a Windows box without Developer Mode
@@ -182,11 +209,11 @@ One variable per machine replaces N per-file overrides. **Do not re-open this up
 duplicating a rotting PR is worse than nothing. If it ever merges, drop the cherry-pick.
 
 `[ ]` Verify it composes with the `machine` pointer (both touch `config.rs`; expect
-conflicts with `up/02-machine`).
+conflicts with `up/machine-field`).
 
 ---
 
-## Phase 3 — machine selection  → upstream `up/02-machine`, then fork-only
+## Phase 3 — machine selection  → upstream `up/machine-field`, then fork-only
 
 `[ ]` `LocalConfig.machine: Option<String>` resolving `.dotter/machines/<name>.toml`.
 Machine files may not chain.
@@ -221,6 +248,18 @@ nor rerere.
 
 `[ ]` `dotter doctor` — git, mergiraf, rerere, driver, machine, cache validity.
 
+`[ ]` **`dotter doctor` layout assertions** — the thing that makes `files/` vs `scripts/`
+enforceable rather than merely conventional (`docs/DESIGN.md` → *Imperative setup*):
+
+  - every path under `files/` appears as a source key in the merged config (else it is
+    deployed nowhere and is silently dead);
+  - no path under `scripts/` appears as a source key;
+  - every `scripts/<name>/` matches a declared package name (else it silently never runs).
+
+  Roots are configurable, defaulting to `files/` and `scripts/`; absent roots skip the
+  check, so this is inert for existing users. Plausibly upstreamable on its own as
+  `up/doctor-layout`, but only after the fork demonstrates it.
+
 Two separate PRs. **Do not start if Phase 0a's number is zero.**
 
 ---
@@ -247,6 +286,21 @@ own config; the edit landing in the right place; rerere making it silent the sec
 
 ---
 
+## Deferred — `run_once` / `run_onchange` script hashing
+
+Scripts under `scripts/<package>/` run on every deploy and must be idempotent. Hash-based
+run-once semantics are deliberately **not** built yet.
+
+Cheap when wanted, because it belongs inside dotter rather than in shell: rendered hooks
+already land in `.dotter/cache/`, and `filesystem::compare_template` already answers "did
+the rendered content change". No new state file, no `sha256sum`/`certutil` split.
+
+**Trigger to watch for:** two or more scripts growing a hand-written
+`[ -f ~/.marker ] && exit 0` guard. Until then the single rule "scripts must be idempotent"
+costs nothing.
+
+---
+
 ## Deferred — multi-target (`FileTarget::Many`)
 
 Not scheduled. Requirement clarified as *"different places on different machines"*, which is
@@ -257,7 +311,7 @@ one target per machine and needs no schema change. See `docs/DESIGN.md` →
 
 - `FileTarget` is an untagged serde enum → `Many` is purely additive, every current config
   still parses.
-- Collides with `up/01-winlink` only, in the `deploy.rs` file-classification loop. One
+- Collides with `up/windows-link-fallback` only, in the `deploy.rs` file-classification loop. One
   function, mechanically resolvable.
 - No shared `cache.toml` migration to bundle: multi-target needs one, Windows linking does
   not.
