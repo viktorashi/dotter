@@ -470,6 +470,120 @@ variation.
 **This argument has a hard dependency on symlinks actually being available — see
 "Windows linking" below, where it currently fails.**
 
+## Imperative setup: what dotter gives you, and what it does not
+
+Some machine-specific configuration is not a file in a place. Installing a corporate CA
+into the system trust store, setting a proxy, enabling a systemd unit, registering a shell
+as a login shell — these are *actions*, and they are machine-specific in exactly the same
+way a file target is.
+
+### What ships today
+
+Four fixed hook paths (`src/args.rs:38-52`), run from `src/deploy.rs` at 46 / 150 / 176 /
+242:
+
+```
+.dotter/pre_deploy.sh    .dotter/post_deploy.sh
+.dotter/pre_undeploy.sh  .dotter/post_undeploy.sh
+```
+
+`src/hooks.rs:10-62`. Properties, read from source:
+
+- The hook is **rendered through handlebars before running** (`perform_template_deploy`,
+  `hooks.rs:41-49`), so every variable — `dotter.windows`, `dotter.packages`, machine
+  variables — is available *inside the script text*.
+- On Windows a `.bat` sibling of a configured `.sh` is preferred (`hooks.rs:16-27`).
+- Non-zero exit **aborts the whole deploy** (`hooks.rs:56-59`).
+- CWD is the repo root. **Only the hook file itself is copied into the cache** — sibling
+  files next to it are not, so `$0`-relative paths break. Reference paths relative to CWD.
+
+What is missing: hooks are **global**. There is no per-package hook, no per-machine hook,
+no idempotency, no ordering. The obvious failure mode is a single `post_deploy.sh` growing
+into a 300-line `case`/`if` — which is the drift problem again, relocated into shell.
+
+### The design: packages already answer "does this apply to this machine?"
+
+`dotter.packages` is injected as a table of *name → enabled* (`handlebars_helpers.rs:318`).
+Since the hook is a template, the **package list can be expanded at render time** and the
+hook becomes a dispatcher over the packages this machine actually selected:
+
+```sh
+# .dotter/post_deploy.sh
+#!/bin/sh
+set -e
+run_dir() {
+  [ -d "$1" ] || return 0
+  for s in "$1"/*.sh; do [ -f "$s" ] && sh "$s"; done
+}
+{{#each dotter.packages}}{{#if this}}
+run_dir "scripts/{{@key}}"
+{{/if}}{{/each}}
+```
+
+**Verified working** (2026-08, release binary, scratch `HOME`). With
+`packages = ["certs", "proxy"]` and script dirs present for `certs`, `proxy` *and* `nvim`,
+dotter rendered exactly two `run_dir` lines and ran only those two. `scripts/nvim/` was
+never touched. A script exiting non-zero aborts the deploy with
+`run post-deploy hook / subshell returned error`.
+
+So: **imperative machine-specific setup needs zero dotter source changes.** Machine
+selection stays in TOML where it belongs; shell only *executes*, it never *decides*. This
+is the opposite of the rejected `link.sh` design, where link destinations lived in a shell
+table.
+
+Ordering within a package is the filename (`10-`, `20-`). Ordering *between* packages is
+`BTreeMap` order, i.e. alphabetical — deterministic, and if that ever matters the packages
+were modelled wrong.
+
+### The layout, and why a script can never be mistaken for an unlinked file
+
+The user's current repo demonstrates the hazard precisely: `docs/` holds `cfg-bin/git` (a
+wrapper meant to be **on `PATH`**, i.e. linked) directly beside `git-settings.sh` and
+`setup-certficates.sh` (meant to be **run once**) and a dead `legacy-shi/`. Nothing in the
+tree distinguishes them, so "is this missing a symlink or is it a script?" is unanswerable
+without reading each file.
+
+Two roots, each with a *mechanical* consequence rather than a convention:
+
+```
+files/<anything>          placed somewhere — claimed by some [pkg.files] entry
+scripts/<package>/*.sh    executed on deploy, only if <package> is selected
+```
+
+- A file under `files/` that no package claims is **dead** — it is deployed nowhere.
+- A script under `scripts/<package>/` where `<package>` is not a real package **never
+  runs**, silently.
+
+Both are real failure modes, so neither directory is self-policing. The convention is made
+enforceable by one check in `dotter doctor` (Phase 4):
+
+1. every path under `files/` appears as a source key in the merged config;
+2. no path under `scripts/` appears as a source key;
+3. every `scripts/<name>/` matches a declared package name.
+
+That turns "did I forget to link this?" from a code review question into a command. The
+directory names carry no magic — `dotter doctor` is what makes them true, and it is the
+reason to prefer this over any naming convention alone.
+
+`files/` is deliberately the same word as dotter's own `[pkg.files]` key: zero new
+vocabulary. Note the split is by *role*, not by package, because most packages have files
+and no scripts; only `scripts/` is package-indexed, and there it is load-bearing rather
+than decorative.
+
+### Idempotency is the script's job — for now
+
+Scripts run on **every** deploy, and `dotter watch` deploys on every source edit. So a
+script must be safe to re-run: `update-ca-trust` is, `>> ~/.profile` is not.
+
+Deliberately not built yet: chezmoi-style `run_once_` / `run_onchange_` hashing. The
+mechanism is nearly free *inside dotter* — rendered hooks already land in `.dotter/cache/`,
+and `filesystem::compare_template` already answers "did the rendered content change" — so
+this is a real feature for a later phase, not a shell state-file hack now.
+
+**The tell to watch for:** the moment two or more scripts grow a hand-written `[ -f
+~/.some-marker ] && exit 0` guard, build `onchange`. Until then, one documented rule
+("scripts must be idempotent") costs nothing.
+
 ## Multi-target: dropped
 
 **Superseded by a clarified requirement.** Earlier drafts treated "one source, many
@@ -533,15 +647,15 @@ exactly what it costs now. Measured overlap with the planned branches:
 
 | branch | files | collides with multi-target? |
 |---|---|---|
-| `up/00-tests` | `tests/` | no |
-| `up/01-winlink` | `filesystem.rs`, `deploy.rs:67-84` | **yes** — same file-classification loop in `deploy.rs` |
-| `up/02-machine` | `config.rs` (`LocalConfig`) | no — different struct from `FileTarget`/`Cache` |
+| `up/config-tests` | `tests/` | no |
+| `up/windows-link-fallback` | `filesystem.rs`, `deploy.rs:67-84` | **yes** — same file-classification loop in `deploy.rs` |
+| `up/machine-field` | `config.rs` (`LocalConfig`) | no — different struct from `FileTarget`/`Cache` |
 
 One conflict, in one function, mechanically resolvable. And there is **no shared
 `cache.toml` migration** to bundle: multi-target needs one (source → *one* target today),
 Windows linking is not expected to. So doing them together saves nothing.
 
-Order matters strategically, not technically: `up/01-winlink` is a bug fix and lands in the
+Order matters strategically, not technically: `up/windows-link-fallback` is a bug fix and lands in the
 same-day bucket, while multi-target is design-blocked (#186 open since 2024). Stacking a
 fast fix behind a slow feature rots both.
 
@@ -1166,7 +1280,7 @@ rotz's 13, 2 are. Sizes and touched files are measured, not estimated.
 | `copy` deployment type with checksum caching | PR **#214** (JP-Ellis), 2026-04 | +1205/-10, 7 files | Overlaps the Windows-linking work: both concern what to do when a symlink is impossible. Hard links are the better answer (round-trip preserved), but the checksum-cache machinery here may be reusable. Read before writing Phase 1. |
 | Elevate permissions on directory access | PR **#215** (archnode), 2026-05 | +822/-86, 5 files | Relevant to `/etc` targets with `owner = "root"`. Large; wait and see if it lands upstream. |
 | Recursive off by default for symbolic folders | PR **#206** (Faria22), 2025-12 | +59/-2, `src/config.rs` | Behaviour change — would alter deploy semantics under us. Track it. |
-| `exclude` function | PR **#216** (haojunyu), 2026-06 | +308/-3, 3 files | Unrelated to this plan, but touches `config.rs` and would conflict with `up/02-machine`. |
+| `exclude` function | PR **#216** (haojunyu), 2026-06 | +308/-3, 3 files | Unrelated to this plan, but touches `config.rs` and would conflict with `up/machine-field`. |
 
 ### Skip, with reasons
 
@@ -1209,12 +1323,13 @@ unit:
 
 ```
 origin/master
-  ├── up/00-tests     golden config fixtures + watch debounce (#196)   pure addition
-  ├── up/01-winlink   hard link + junction fallback                    bug fix
-  └── up/02-machine   `machine` pointer field                          small feature
+  ├── up/config-tests            golden config fixtures            pure addition
+  ├── up/watch-filter            #196 watch recursion              bug fix
+  ├── up/windows-link-fallback   hard link + junction fallback      bug fix
+  └── up/machine-field           `machine` pointer field            small feature
 ```
 
-All three are cut **independently from `origin/master`** — none depends on another, so they
+All four are cut **independently from `origin/master`** — none depends on another, so they
 review and merge in parallel. Everything else stays in the fork.
 
 Rules a fresh implementer must follow:
