@@ -702,6 +702,7 @@ exactly what it costs now. Measured overlap with the planned branches:
 |---|---|---|
 | `up/config-tests` | `tests/` | no |
 | `up/windows-link-fallback` | `filesystem.rs`, `deploy.rs:67-84` | **yes** — same file-classification loop in `deploy.rs` |
+| `up/self-overwrite-guard` | `actions.rs` | no |
 | `up/machine-field` | `config.rs` (`LocalConfig`) | no — different struct from `FileTarget`/`Cache` |
 
 One conflict, in one function, mechanically resolvable. And there is **no shared
@@ -1460,6 +1461,87 @@ The `.bat` must therefore resolve `sh.exe` by absolute path, derived from `git` 
 bootstrap guarantees): `where git` → `…\Git\cmd\git.exe` → `…\Git\bin\sh.exe`. Never call
 bare `bash`.
 
+### Resolved: a package needs no files, so "package vs. script" is not an axis
+
+The worry was that dotter packages are indexed by *tool* (`nvim`, `tmux`) while some
+material is indexed by *concern* (`security-crypto/`, `auto-hotkey/`, `docs/vindovs/`), and
+that the doctor rule "every `scripts/<name>/` matches a declared package" forces one
+taxonomy. A second selection axis — a machine as a composition of packages **and** scripts
+— was considered and **rejected**.
+
+It is unnecessary. `Package` is:
+
+```rust
+pub struct Package {
+    #[serde(default)] depends: Vec<String>,
+    #[serde(default)] files: Files,
+    #[serde(default)] variables: Variables,
+}
+```
+
+`files` has `#[serde(default)]`, so **a package with zero files is legal today**. A
+script-only package (`certs`, `work-proxy`) is just a package that declares no files, and it
+composes, `depends`-chains and machine-selects exactly like any other. Packages are
+arbitrary named sets; nothing forces them to be tools.
+
+A second axis would be invented schema for something dotter already does — the same mistake
+as the discarded `[settings.variants]`, and it would also break the dispatcher, which works
+precisely *because* `dotter.packages` is the injected variable.
+
+### Resolved: dotter must be run from the repo root, and that is fine
+
+Checked `src/args.rs` in full: there is **no `--directory` / chdir option** (`-d` is
+`--dry-run`). Every path defaults to `.dotter/…` relative to CWD, source keys in
+`[pkg.files]` are relative to CWD, and `watch.rs:17` uses `std::env::current_dir()` as the
+watch root. So the CWD requirement is real and undocumented.
+
+It is nevertheless benign: run from elsewhere, dotter cannot find `.dotter/global.toml` and
+**fails loudly** rather than misbehaving. The only thing needed is that the convenience
+alias carries the `cd` — `dot='(cd ~/.dotfiles && dotter)'`, subshell so the caller's CWD is
+untouched. No source change, nothing to upstream.
+
+### Decided: directories expand by default, and the alternative loses templating
+
+`recurse` is not a detail — it picks which half of the vision you get. Both halves measured
+with the release binary against a scratch `HOME`:
+
+| | default (`recurse` on) | `recurse = false` |
+|---|---|---|
+| what is created | one symlink **per file** | **one** symlink for the whole directory |
+| template a file inside | **works** — a more specific entry wins cleanly, source untouched | **impossible**, see below |
+| app writes a *new* file into the target | **silently invisible** — `lazy-lock.json` created in the target never appeared in the repo | **lands in the repo automatically** — appeared as `files/nvim/lazy-lock.json` |
+
+So whole-directory linking gives "live edits must survive" for free and forbids templating;
+expansion gives templating and silently drops anything the app adds.
+
+**For nvim, expansion wins**, because machine-specific keybindings are a real requirement
+and `.config/nvim/` is where they live. The cost — new app-written files must be added by
+hand — is mitigated by extending `dotter doctor` with a fourth check: for every deployed
+directory, report target-side files that have no source entry. That is the same
+orphan-detection the `files/` rule already performs, pointed the other way.
+
+Note the corpus already tracks three app-written files inside `.config/nvim/`:
+`lazy-lock.json`, `lazyvim.json`, `.neoconf.json`. `lazy-lock.json` is rewritten on every
+`:Lazy update`, so it is the vision's own test case sitting inside the largest package.
+
+#### Data-loss bug found: a template whose target resolves back to its own source
+
+Combining the two — whole-directory symlink plus a template entry for one file inside it —
+is the obvious hybrid, and it is **destructive**. Verified:
+
+1. Without `--force`, dotter refuses: `Creating template … but target file already exists.
+   Skipping.` The target path resolves *through* the directory symlink to the source file
+   itself, so dotter sees its own source and treats it as a foreign file.
+2. **With `--force`, dotter deletes the source and then fails reading it**:
+   `read template source file / read from file / No such file or directory (os error 2)`.
+   `files/nvim/lua/keys.lua` was gone from the repo afterwards. Unrecoverable.
+
+This is upstream's bug, not ours, and it is a good small PR: one guard refusing to deploy
+when the resolved target is the source. The `same-file` crate is already required for the
+Windows work (*Windows linking*), so the check costs a comparison, not a dependency. Small,
+obviously correct, and in the data-loss class the maintainer merges same-day. Branch
+`up/self-overwrite-guard`.
+
 ## Upstreaming strategy
 
 Maintainer record (GitHub API, 2026-08): small obviously-correct PRs merge same-day
@@ -1482,11 +1564,12 @@ unit:
 origin/master
   ├── up/config-tests            golden config fixtures            pure addition
   ├── up/watch-filter            #196 watch recursion              bug fix
+  ├── up/self-overwrite-guard    refuse target == source           bug fix, data loss
   ├── up/windows-link-fallback   hard link + junction fallback      bug fix
   └── up/machine-field           `machine` pointer field            small feature
 ```
 
-All four are cut **independently from `origin/master`** — none depends on another, so they
+All five are cut **independently from `origin/master`** — none depends on another, so they
 review and merge in parallel. Everything else stays in the fork.
 
 Rules a fresh implementer must follow:
