@@ -98,6 +98,17 @@ box: bare `sh` is not on `PATH`, and bare `bash` is `C:\WINDOWS\system32\bash.ex
 launcher, which would run the Windows deploy hook inside Linux and appear to succeed. See
 `docs/DESIGN.md` → *Gaps*.
 
+`[ ]` Deploy `.config/nvim/` **expanded** (dotter's default), not `recurse = false`.
+Verified trade in `docs/DESIGN.md` → *Decided: directories expand by default*: expansion is
+the only mode that permits templating a file inside, which the machine-specific keybindings
+require. Accept that new app-written files must be added by hand until the doctor check
+above exists. **Never** combine a whole-directory symlink with a template entry inside it —
+that path deletes the source file (verified).
+
+`[ ]` Define `dot` as `(cd ~/.dotfiles && dotter)` — a subshell, so the caller's CWD is
+untouched. Dotter has no chdir flag and resolves every path from CWD; it fails loudly
+elsewhere, so the alias is the whole fix.
+
 `[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
 composition only, **zero content templates**. Select with `-l` for now (the `machine`
 pointer does not exist yet).
@@ -169,6 +180,29 @@ before submitting:
 with different sources and the same target is *not* a config error — it fails at deploy
 time, first-writer-wins by alphabetical package order. This is composition's main sharp
 edge.
+
+---
+
+## Phase 0c — refuse to deploy onto your own source  → upstream `up/self-overwrite-guard`
+
+**Data loss, verified against the release binary.** With a whole-directory symlink
+(`recurse = false`) plus a template entry for a file inside that directory, the template's
+target resolves *through* the symlink back to its own source.
+
+- without `--force`: refuses with `target file already exists. Skipping.`
+- **with `--force`: deletes the source, then fails reading it** —
+  `read template source file / read from file / No such file or directory (os error 2)`.
+  The repo file was gone.
+
+`[ ]` Guard in `src/actions.rs`: before deleting/overwriting a target, refuse if it is the
+same file as the source. Use the `same-file` crate — already required by Phase 1, so no new
+dependency.
+
+`[ ]` Test in the Phase 0b corpus: whole-dir symlink + inner template + `--force` must fail
+without touching the source.
+
+Small, obviously correct, data-loss class — the bucket this maintainer merges same-day. Cut
+from `origin/master`, independent of every other branch.
 
 ---
 
@@ -291,6 +325,11 @@ enforceable rather than merely conventional (`docs/DESIGN.md` → *Imperative se
     deployed nowhere and is silently dead);
   - no path under `scripts/` appears as a source key;
   - every `scripts/<name>/` matches a declared package name (else it silently never runs).
+    Note a script-only package is legal — `Package.files` is `#[serde(default)]`, verified —
+    so `certs` may declare zero files;
+  - **for every deployed directory, target-side files with no source entry.** Expanded
+    directories silently drop anything the app writes into them (`lazy-lock.json` was
+    verified invisible). Same orphan-detection as the `files/` rule, pointed the other way.
 
   Roots are configurable, defaulting to `files/` and `scripts/`; absent roots skip the
   check, so this is inert for existing users. Plausibly upstreamable on its own as
