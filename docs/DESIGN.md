@@ -1514,15 +1514,49 @@ with the release binary against a scratch `HOME`:
 So whole-directory linking gives "live edits must survive" for free and forbids templating;
 expansion gives templating and silently drops anything the app adds.
 
-**For nvim, expansion wins**, because machine-specific keybindings are a real requirement
-and `.config/nvim/` is where they live. The cost — new app-written files must be added by
-hand — is mitigated by extending `dotter doctor` with a fourth check: for every deployed
-directory, report target-side files that have no source entry. That is the same
-orphan-detection the `files/` rule already performs, pointed the other way.
+**Expansion violates the constitution.** *"NOTHING leaves your dotfiles repo (templated or
+otherwise) without having a breadcrumb back to the source — point a git client at
+`~/.dotfiles` and you're set. Guaranteed. No edge-cases."* An expanded directory drops
+app-written files on the floor: `lazy-lock.json` existed at the destination and had no
+breadcrumb anywhere. That is precisely an edge-case, so the earlier "expansion wins for
+nvim" conclusion is **withdrawn**.
 
-Note the corpus already tracks three app-written files inside `.config/nvim/`:
-`lazy-lock.json`, `lazyvim.json`, `.neoconf.json`. `lazy-lock.json` is rewritten on every
-`:Lazy update`, so it is the vision's own test case sitting inside the largest package.
+A `dotter doctor` check does not rescue it. Detection is not a guarantee — a check you must
+remember to run is itself the edge-case the rule forbids.
+
+So the default inverts: **app-managed directories are linked whole (`recurse = false`).**
+Everything the app writes lands in the repo with no action, which is the same property a
+symlinked single file has, and is why the vision says *prefer a link over a rendered copy*.
+
+#### Then where do the machine-specific bits go?
+
+Not inside the linked tree — nothing can be templated in there. Two rungs before reaching
+for templating, in order:
+
+1. **A different source file per machine, linked to the same destination.** This is the
+   composition model already chosen (*A file goes to exactly one place per machine*), needs
+   no templating and no new mechanism.
+2. **An app-native include, pointing outside the linked tree.** nvim can `pcall(dofile, …)`
+   a path under a separately-deployed directory; the committed config carries the one-line
+   loader, and the machine chooses which file lands there. This keeps `.config/nvim/` whole
+   and machine-agnostic.
+
+Templating is the third rung, per *Template only what cannot be linked*.
+
+**And nvim may need none of it.** `lua/config/keymaps.lua` was one of the ~3 files flagged
+as needing intra-file variation. Reading the actual `arch-wsl` ↔ `windows10` diff: it is a
+**refactor** — `arch-wsl` extracted a `sterge_buffer` local and looped over
+`<D-w>`/`<A-w>`/`<A-W>`, `windows10` still has the inline form. The only platform-flavoured
+token is `<D-w>` (Cmd), which is inert elsewhere. That is drift, not divergence. Phase 0a
+must re-derive the intra-file count *after* reconciliation, because the pre-reconciliation
+number is inflated by exactly this kind of noise.
+
+#### The tool-level consequence
+
+Where expansion *is* used, orphan detection cannot be an opt-in subcommand. "Guaranteed. No
+edge-cases." means deploy itself reports target-side files under a managed directory that
+have no source entry. Keep the `doctor` check, but the default-on report during deploy is
+what actually satisfies the rule.
 
 #### Data-loss bug found: a template whose target resolves back to its own source
 
