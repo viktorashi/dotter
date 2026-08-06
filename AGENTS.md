@@ -5,8 +5,7 @@ Repo-local rules for AI agents working on this fork of
 
 ## The vision
 
-> **Dotfiles management with first-class support for single-source, multiple-targets and
-> templates. Written in Rust.**
+> **Dotfiles management where configs don't drift across machines. Written in Rust.**
 
 Things that stay true regardless of implementation:
 
