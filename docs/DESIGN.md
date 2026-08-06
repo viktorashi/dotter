@@ -255,25 +255,88 @@ may still use env expansion — `${APPDATA:-/nonexistent}` already works today.
 A content template that genuinely needs live env opts out of classification and always
 routes to manual conflict. Acceptable degradation.
 
-## Declared machines
+## Declared variants (not "machines")
+
+An earlier draft proposed a machine table with inheritance:
 
 ```toml
+# REJECTED
 [settings.machines]
-arch-laptop = { os = "linux", distro = "arch" }
-desktop     = { inherits = "arch-laptop" }
-work-rhel   = { inherits = "arch-laptop", distro = "rhel" }
-win-work    = { os = "windows", version = "10" }
+desktop   = { inherits = "arch-laptop" }
+work-rhel = { inherits = "arch-laptop", distro = "rhel" }
 ```
 
-Keyed by hostname. Dotter **already** falls back to `<hostname>.toml` when `local.toml`
-is missing (`config.rs:159-171`), so a new machine self-identifies with zero config;
-`--machine` overrides. `inherits` is a BTreeMap merge (~30 lines).
+**This is wrong.** If a machine's config is identical to another's, it *is* that config —
+recording "desktop is the same as arch-laptop" adds a tracked line that carries no
+information. And when it later diverges, the divergence shows up naturally as a template
+conditional or a machine-specific file. The `inherits` line never becomes the place the
+difference lives, so it is pure bookkeeping.
 
-Per-machine, not per-OS: arch-laptop, desktop and work-rhel are all `linux` and must be
-allowed to differ.
+What classification actually needs is much smaller. To render every variant of a template
+from one machine, dotter needs **the set of values each branching variable can take** —
+nothing about machines at all:
 
-Backlog: a TUI picker that proposes an existing machine to inherit from based on detected
-distro / Windows version. Not core.
+```toml
+[settings.variants]
+profile = ["arch", "rhel", "macos", "windows"]
+```
+
+That is one tracked key holding a list of strings. Rendering all variants means rendering
+once per value.
+
+A machine then just *selects* a value, in untracked `local.toml`:
+
+```toml
+profile = "arch"
+packages = ["core", "desktop"]
+```
+
+Consequences:
+
+- **Identical machines cost nothing.** Two Arch boxes both say `profile = "arch"`. No
+  tracked change, nothing to commit, no drift.
+- **Divergence is created only when it exists.** Adding `"rhel"` to `variants.profile`
+  happens at the moment you write the first `{{#if (eq profile "rhel")}}`, not before.
+- **Variables already exist.** `profile` is an ordinary dotter variable; templates branch
+  on it with machinery that ships today. `settings.variants` only *enumerates* it so all
+  variants can be rendered.
+- Nothing is per-hostname, so `whoami.hostname`-style branching stays out by construction —
+  which is exactly the constraint classification needs.
+
+`dotter init-machine` therefore writes **only `local.toml`** and never touches tracked
+config. A new machine requires no commit at all.
+
+## Machine-specific files (no git branches)
+
+The question this project exists to answer: how does a file that belongs to *one* profile
+avoid being treated as generic — without git branches?
+
+Branches are the thing being replaced, and for the reason you named: with branches you are
+permanently checked out on one of them, so every machine drifts from every other while
+sharing most of its functionality. One tree, all machines, is the point.
+
+**Dotter already solves this two ways, both shipping today** — no new feature:
+
+```toml
+# 1. conditional file: parsed always, deployed only where the condition holds
+[core.files]
+"wsl/wsl.conf" = { target = "/etc/wsl.conf", if = "(eq profile \"windows\")" }
+
+# 2. packages: local.toml selects which sets deploy at all
+[work.files]
+"ssh/work_config" = "~/.ssh/config.d/work"
+```
+
+```toml
+# local.toml on the work box
+packages = ["core", "work"]
+```
+
+Use `if` for one-off files, packages for coherent groups. Both are per-file/per-group
+existence, orthogonal to per-file *content*, which is what templating handles.
+
+For classification this is the easy case: a file present in only one variant has nothing
+to compare against in the others, so it is trivially machine-specific. No ambiguity.
 
 ## Multi-target
 
@@ -407,35 +470,63 @@ Mitigations, in the script:
 
 Not in debian/ubuntu/fedora/scoop; **is** in chocolatey (verified).
 
-### `dotter init-machine` — the machine picker
+### Why two scripts and not one
+
+The obvious wish is a single script that detects your shell and routes itself. Two ways to
+read that, and they land differently:
+
+**One *file* that is simultaneously valid POSIX sh and valid PowerShell.** Polyglot tricks
+exist (the `@echo off` / `:;` batch-and-sh hack is the famous one), but they work by
+exploiting parser quirks in both languages at once. The result is unreadable, breaks on any
+edit, and cannot be linted by either language's tools. It buys nothing a second file
+doesn't, and costs the ability to maintain it. Rejected.
+
+**One *URL* that serves the right script.** This is the real ask — the complaint is "I have
+to know which command to run", not "there must be one file". It works, because the clients
+are trivially distinguishable by `User-Agent`:
+
+```
+curl        →  curl/8.18.0
+PowerShell  →  Mozilla/5.0 (Windows NT ...) WindowsPowerShell/5.1.x
+```
+
+So `install.sh`/`install.ps1` stay as they are, and ~5 lines of server config (nginx `map`,
+a Cloudflare Worker, whatever hosts the domain) route one URL by UA. Zero script
+complexity, and the two files stay independently lintable.
+
+**Note what everyone else does.** bun: `curl -fsSL https://bun.com/install` and
+`powershell -c "irm bun.sh/install.ps1 | iex"`. rustup: `sh.rustup.rs` plus a separate
+`rustup-init.exe`. starship, deno, uv, homebrew: all two entry points. Nobody ships a
+polyglot. That is strong evidence the second file is not the part worth optimising away.
+
+Also note a hard limit on "detect the shell and route": on a bare Windows box there is no
+`sh` to do the detecting. The routing has to happen *before* a shell runs — i.e. at the
+URL, or in the user's head. There is no third option.
+
+
 
 Answers "on a brand-new machine, which existing config do I fork from?" without
 hand-editing TOML.
 
 1. **Probe** hostname, OS, and distro — `/etc/os-release` `ID`/`VERSION_ID` on Linux,
    `sw_vers` on macOS, build number on Windows.
-2. **Read** `[settings.machines]` from the freshly cloned `global.toml`.
-3. **Rank** candidates by similarity to the probe (same os+distro first), preselecting the
-   best match.
-4. **Present** an fzf-style filter-as-you-type list, plus a "blank profile" entry:
+2. **Read** `settings.variants` from the freshly cloned `global.toml`.
+3. **Rank** candidates by similarity to the probe, preselecting the best match.
+4. **Present** an fzf-style filter-as-you-type list:
 
 ```
-? which machine should this one inherit from?  (type to filter)
-> arch-laptop    linux/arch      ← best match for this machine (linux/arch)
-  desktop        linux/arch
-  work-rhel      linux/rhel
-  win-work       windows/10
-  ─────────────
-  (blank profile)
+? which profile does this machine use?  (type to filter)
+> arch      ← best match for this machine (linux/arch)
+  rhel
+  macos
+  windows
 ```
 
-5. **Write** the choice:
-   - `.dotter/local.toml` ← `packages` from the chosen machine *(untracked, per-machine)*
-   - `[settings.machines.<hostname>] inherits = "<chosen>"` appended to `global.toml`
-     *(tracked — this is the "fork")*
-6. **Print** `review and commit .dotter/global.toml`.
-
-So a new machine is: run the installer, pick from a list, commit one line.
+5. **Write `.dotter/local.toml` only** — the selected `profile` and the `packages` for it.
+   Untracked, per-machine. **Tracked config is never modified**, so a new machine needs no
+   commit.
+6. If the probe matches no declared variant, offer to add one — that *is* a tracked change,
+   and it is the correct moment for one, because a genuinely new variant now exists.
 
 **Implementation: `inquire`.** Its default features are
 `["macros", "crossterm", "one-liners", "fuzzy"]` and it requires `crossterm ^0.29.0` —
@@ -511,11 +602,11 @@ Port the real dotfiles to it — that is the demo.
 
 ### Phase 1b — `dotter init-machine` + bootstrap scripts
 
-`inquire`-based machine picker, plus the two installer scripts (already drafted in
-`bootstrap/`). Depends on declared machines existing, but not on classification, so it can
+`inquire`-based profile picker, plus the two installer scripts (already drafted in
+`bootstrap/`). Depends on declared variants existing, but not on classification, so it can
 land before Phase 3.
 
-**Stays in the fork, not upstreamed.** The bootstrap scripts assume `settings.machines`
+**Stays in the fork, not upstreamed.** The bootstrap scripts assume `settings.variants`
 and `dotter setup-git`, neither of which exists upstream; and a `curl | sh` installer is a
 project-identity decision that belongs to the maintainer, not a contributor.
 

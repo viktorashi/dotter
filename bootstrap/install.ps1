@@ -102,10 +102,11 @@ if (-not (Test-Path (Join-Path $Dotfiles ".git"))) {
 }
 
 Set-Location $Dotfiles
-Say "selecting machine profile"
-dotter init-machine     # fzf-style picker; writes local.toml, may extend global.toml
-dotter setup-git        # rerere + mergiraf merge driver + .gitattributes
-dotter deploy
+
+# Guarded. init-machine is an interactive picker: do not pipe it.
+dotter init-machine; if ($LASTEXITCODE) { Die "machine selection cancelled or failed" }
+dotter setup-git;    if ($LASTEXITCODE) { Die "git setup failed" }
+dotter deploy;       if ($LASTEXITCODE) { Die "deploy failed - re-run with: dotter deploy -v" }
 
 Say "done"
 if ($PathWarn) {
