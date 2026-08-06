@@ -137,13 +137,76 @@ type IncludedConfig = BTreeMap<String, Package>;
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct LocalConfig {
+    /// Name of a tracked machine file under `<config dir>/machines/<name>.toml`.
+    /// When set, that file supplies this config; anything set here overrides it.
+    /// Lets local.toml be a single generated line instead of hand-written state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    machine: Option<String>,
     #[serde(default)]
     includes: Vec<PathBuf>,
+    #[serde(default)]
     packages: Vec<String>,
     #[serde(default)]
     files: Files,
     #[serde(default)]
     variables: Variables,
+}
+
+/// Path of the machine file named `name`, as a sibling `machines/` dir of the local config.
+pub fn machine_path(local_config: &Path, name: &str) -> PathBuf {
+    local_config
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("machines")
+        .join(format!("{name}.toml"))
+}
+
+/// List the machine names available next to `local_config`.
+pub fn list_machines(local_config: &Path) -> Result<Vec<String>> {
+    let dir = local_config
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("machines");
+    if !dir.is_dir() {
+        return Ok(vec![]);
+    }
+    let mut out = vec![];
+    for entry in std::fs::read_dir(&dir).with_context(|| format!("read {dir:?}"))? {
+        let path = entry.context("read dir entry")?.path();
+        if path.extension().is_some_and(|e| e == "toml") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                out.push(stem.to_string());
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+impl LocalConfig {
+    /// Resolve `machine = "..."` by loading the tracked machine file and layering
+    /// this config on top of it.
+    fn resolve_machine(self, local_config: &Path) -> Result<Self> {
+        let Some(name) = self.machine.clone() else {
+            return Ok(self);
+        };
+        let path = machine_path(local_config, &name);
+        let mut base: LocalConfig = filesystem::load_file(&path)
+            .and_then(|c| c.ok_or_else(|| anyhow::anyhow!("file not found")))
+            .with_context(|| format!("load machine config {path:?}"))?;
+
+        anyhow::ensure!(
+            base.machine.is_none(),
+            "machine {name:?} sets `machine` itself; machine files cannot chain"
+        );
+
+        base.includes.extend(self.includes);
+        base.packages.extend(self.packages);
+        base.files.extend(self.files);
+        recursive_extend_map(&mut base.variables, self.variables);
+        base.machine = Some(name);
+        Ok(base)
+    }
 }
 
 pub fn load_configuration(
@@ -173,6 +236,12 @@ pub fn load_configuration(
     let local: LocalConfig = filesystem::load_file(local_config_buf.as_path())
         .and_then(|c| c.ok_or_else(|| anyhow::anyhow!("file not found")))
         .with_context(|| format!("load local config {local_config:?}"))?;
+    let local = local
+        .resolve_machine(local_config)
+        .context("resolve machine config")?;
+    if let Some(name) = &local.machine {
+        info!("Using machine {:?}", name);
+    }
     trace!("Local config: {:#?}", local);
 
     let mut merged_config =
