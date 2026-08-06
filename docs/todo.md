@@ -98,12 +98,26 @@ box: bare `sh` is not on `PATH`, and bare `bash` is `C:\WINDOWS\system32\bash.ex
 launcher, which would run the Windows deploy hook inside Linux and appear to succeed. See
 `docs/DESIGN.md` → *Gaps*.
 
-`[ ]` Deploy `.config/nvim/` **expanded** (dotter's default), not `recurse = false`.
-Verified trade in `docs/DESIGN.md` → *Decided: directories expand by default*: expansion is
-the only mode that permits templating a file inside, which the machine-specific keybindings
-require. Accept that new app-written files must be added by hand until the doctor check
-above exists. **Never** combine a whole-directory symlink with a template entry inside it —
-that path deletes the source file (verified).
+`[ ]` Deploy `.config/nvim/` as **`recurse = false`** — one whole-directory symlink.
+Verified: this is the only mode where app-written files (`lazy-lock.json`, `lazyvim.json`,
+`.neoconf.json`) land in the repo unaided, which the constitution requires — *"NOTHING
+leaves your dotfiles repo without a breadcrumb back to the source. Guaranteed. No
+edge-cases."* Expansion drops them silently, and a `doctor` check does not fix that (a check
+you must remember to run is itself an edge-case). Reasoning in `docs/DESIGN.md` → *Decided:
+directories expand by default*. **Never** combine a whole-directory symlink with a template
+entry inside it — that path deletes the source file (Phase 0c).
+
+`[ ]` Put machine-specific nvim bits **outside** the linked tree — nothing inside it can be
+templated. In order: a different source file per machine linked to the same destination;
+then an app-native include (`pcall(dofile, …)`) pointing at a separately-deployed path;
+templating only if neither works.
+
+`[ ]` Re-derive the intra-file-variation count **after** drift reconciliation, not before.
+`lua/config/keymaps.lua` was one of the ~3 flagged files and its `arch-wsl` ↔ `windows10`
+diff is a **refactor** (extracted `sterge_buffer` local, loop over `<D-w>`/`<A-w>`/`<A-W>`),
+not machine divergence — the only platform-flavoured token is `<D-w>`, inert elsewhere. The
+pre-reconciliation number is inflated by exactly this noise, and this number gates Phases 4
+and 5.
 
 `[ ]` Define `dot` as `(cd ~/.dotfiles && dotter)` — a subshell, so the caller's CWD is
 untouched. Dotter has no chdir flag and resolves every path from CWD; it fails loudly
@@ -330,6 +344,9 @@ enforceable rather than merely conventional (`docs/DESIGN.md` → *Imperative se
   - **for every deployed directory, target-side files with no source entry.** Expanded
     directories silently drop anything the app writes into them (`lazy-lock.json` was
     verified invisible). Same orphan-detection as the `files/` rule, pointed the other way.
+    This one must **also report during `deploy`**, not only under `doctor` — the
+    constitution's "guaranteed, no edge-cases" is not satisfied by a check you have to
+    remember to run.
 
   Roots are configurable, defaulting to `files/` and `scripts/`; absent roots skip the
   check, so this is inert for existing users. Plausibly upstreamable on its own as
