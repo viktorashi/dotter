@@ -352,6 +352,11 @@ location is circular), `merge.tool`/`merge.args` (Phase 4), `files_root`/`script
 `verbosity` — the last group being exactly the category the quote describes. The nine
 `.dotter/*` path options come free with the mechanism; do not advertise them.
 
+`[ ]` Wiki/README note on package hygiene (see `docs/DESIGN.md` → *Package hygiene*): the
+source-side rule is already enforced, so document the two that are not — prefer a machine
+`[files]` override over two mutually-exclusive packages sharing a source key, and know that
+**target** collisions are caught only at deploy time.
+
 `[ ]` **Guard:** `machine` must **not** move into `dotter.toml`. The deployed copy may be
 rendered per machine, so naming the machine there is circular. It stays in
 `.dotter/local.toml`.

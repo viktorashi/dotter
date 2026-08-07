@@ -573,6 +573,52 @@ Drift needs no new mechanism:
 | WSL needs interop files native Arch must not | a `wsl.toml` layer, included only by the WSL machine |
 | a shared file's *contents* differ | a variable, or an app-native `include` directive |
 
+### Package hygiene: what to recommend, and what is already the law
+
+The natural advice is *"a source file should belong to exactly one package"*. Verified: for
+the packages a machine actually enables, **dotter already enforces this**, and there is
+nothing to recommend. `retain` drops disabled packages (`config.rs:342`), then the merge loop
+refuses a repeat:
+
+```rust
+if first_package.files.contains_key(&file_name) {
+    anyhow::bail!("file {:?} already encountered", file_name);
+}
+```
+
+Same for scalar variables (`variable "X" already encountered`, `config.rs:355`) — though
+*tables* merge recursively rather than erroring, so `[variables.foo]` in two packages is
+legal and combines.
+
+So `has_files(package) -> {files}` is injective by construction over the enabled set. What
+survives as guidance is narrower, and worth stating precisely.
+
+**1. `depends` is the right tool, and splitting is the right response to it being too
+coarse.** `depends` is a transitive closure (`config.rs:315-333`) and pulls in *every* file
+of the package it names. If you want one file out of a ten-file package, that is the
+package telling you it is two packages. Split it and depend on the half you need. This is
+already how the mechanism wants to be used; no enforcement needed, and none possible.
+
+**2. Do not reach for the mutually-exclusive-package loophole.** Because `retain` runs
+*before* the duplicate check, two packages that are never enabled together **may** share a
+source key — `nvim-linux` and `nvim-windows`, same source, different target. It is legal and
+it is a trap: the collision is invisible until some machine enables both, at which point a
+working config becomes a hard error at a distance. A `[files]` override in the machine file
+(`config.rs:409`) expresses *"same file, different place here"* directly, and cannot
+collide. Prefer it.
+
+**3. The rule nothing enforces is the target, not the source.** Two packages may declare
+**different sources pointing at the same target**. That is *not* a config error — it fails
+at deploy time, first-writer-wins by alphabetical package order (see *Recon log → target
+collisions are not caught at config time*). This is the one that deserves the wiki entry,
+because it is the exact inverse of the rule people assume they need: dotter guards the left
+side of the mapping and not the right.
+
+Since the model is *composition*, and composition means combining packages written at
+different times, the honest recommendation set is: **split rather than share, override
+rather than duplicate, and let `doctor` catch the target collisions** (Phase 4) — since that
+is the only one of the three a user can get wrong silently.
+
 ### Machine selection: the `machine` pointer
 
 **Hostname selection is rejected.** A Windows host and its WSL guest report the same
