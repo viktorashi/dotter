@@ -330,6 +330,49 @@ drafted, need the picker to exist. **Fork-only, permanently.**
 
 ---
 
+## Phase 3b — `dotter.toml` settings file  → upstream `up/dotter-toml`, then fork-only
+
+**The maintainer proposed this himself** and nobody built it. Verified via the API (comment
+`770217516`, 2021-01-30, issue #51), while declining to hardcode a behaviour:
+
+> "I'm open to implementing this as a flag though. Maybe it's about time we had a
+> `dotter.toml` for these kinds of settings…"
+
+Full design, including the two-files-one-job-each split and the reversal of the earlier
+rejection, in `docs/DESIGN.md` → *Reversed: a `dotter.toml` settings file is worth building*.
+
+`[ ]` **Upstream half — `up/dotter-toml`, cut from `origin/master`.** A settings struct of
+`Option<T>` fields resolved in git's precedence order: compiled defaults <
+`~/.config/dotter/dotter.toml` < `<repo>/dotter.toml` < CLI flags. No new subcommand, no
+behaviour change when neither file exists. Open the PR quoting his own comment.
+
+`[ ]` Settings that earn their place: `repo` (global-file-only — a repo declaring its own
+location is circular), `merge.tool`/`merge.args` (Phase 4), `files_root`/`scripts_root`
+(Phase 4 doctor), and the behaviour flags `force` / `noconfirm` / `diff_context_lines` /
+`verbosity` — the last group being exactly the category the quote describes. The nine
+`.dotter/*` path options come free with the mechanism; do not advertise them.
+
+`[ ]` **Guard:** `machine` must **not** move into `dotter.toml`. The deployed copy may be
+rendered per machine, so naming the machine there is circular. It stays in
+`.dotter/local.toml`.
+
+`[ ]` Document the split against the existing `[settings]` table in `global.toml`
+(`config.rs:89`): `[settings]` = **how files in this repo are deployed**; `dotter.toml` =
+**how the tool runs**. State it, or it becomes the next confusion.
+
+`[ ]` **Fork-only half — bootstrap.** `--clone <url>`: clone **once** into a temp dir, read
+its `dotter.toml`, then `mv` the tree to the configured location. Never fetch twice. Then
+route into `init-machine` (Phase 3), which short-circuits if `local.toml` is already valid.
+
+`[ ]` The "you are in a dotter repo that git does not track" warning goes in **`dotter
+doctor`**, not on every invocation — a warning printed every run is one nobody reads.
+
+`[ ]` Supersedes the `dot` alias and makes `up/directory-flag` unnecessary: `repo` in the
+global file answers "where is my dotfiles repo" from anywhere. Revisit the *Unscheduled*
+trigger for `-C` once this lands.
+
+---
+
 ## Phase 4 — `dotter merge` + `dotter setup-git`  → gated on Phase 0a
 
 `[ ]` On `TemplateComparison::Changed`, emit the 3-way (base = `.dotter/cache/`,

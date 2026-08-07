@@ -801,13 +801,28 @@ possible later without templating the justfile. Not built now; nothing needs it 
 The word "variable" is doing three different jobs, and conflating them is what makes this
 feel unsolvable. Separate them and the confusion goes away.
 
-| kind | known when | who supplies it | example |
+| kind | supplied by | available | example |
 |---|---|---|---|
-| **authored** | when you commit | you, in a machine or package file | `config_dir`, `theme = "dark"` |
-| **discovered** | when dotter runs | dotter itself, or the environment | `dotter.windows`, `$APPDATA` |
-| **runtime** | only by executing something | a script, or the app itself | the path `where git` prints |
+| **authored** | you, in a machine or package file | always | `config_dir`, `theme = "dark"` |
+| **built-in** | dotter | before rendering | `dotter.windows`, `dotter.hostname` |
+| **environment** | the process environment | before rendering | `$APPDATA` |
+| **runtime** | executing a program | **after** rendering | the path `where git` prints |
 
 Dotter's `[variables]` is **only the first kind**. That is not a gap.
+
+"Discovered" was an earlier name for the middle two and it was wrong — it lumped `$APPDATA`
+in with `where git`, and those are on opposite sides of the only line that matters.
+
+**The load-bearing distinction is the render boundary, not who knows the value.** Built-ins
+and environment variables are readable by dotter *before* it renders, so they can appear in a
+template or a target path. A runtime value requires executing a program, and dotter executes
+nothing until every template is already on disk — so it can **never** appear in one, on any
+machine, by construction.
+
+`built-in` is also not one thing internally, though the difference does not leak: `dotter.os`
+and `dotter.windows/linux/macos/unix` are compile-time `cfg!` macros baked into the binary,
+while `dotter.hostname` and `dotter.current_dir` are queried at startup. Both are available
+at the same moment, so both are usable in the same places.
 
 ### Why runtime values can never become dotter variables
 
@@ -1793,26 +1808,130 @@ nothing is silently wrong.
 The fix is the alias `dot='(cd ~/.dotfiles && dotter)'` — a subshell, so the caller's CWD is
 untouched. No source change.
 
-#### Rejected: a global config at `~/.config/dotter/dotter.toml`
+#### Reversed: a `dotter.toml` settings file is worth building
 
-Verified there is none today — no `dirs`/`directories` dependency, no XDG lookup, no
-`$HOME`-relative path anywhere in `src/`. Everything is CWD-relative by construction.
+An earlier version of this document **rejected** a global config on two grounds. Both have
+since been answered, so the rejection is withdrawn. Recording why, because the rejection was
+correct about the thing it was actually looking at:
 
-It was considered as a way to record where the dotfiles repo lives. Rejected on three
-counts:
+| original objection | what answers it |
+|---|---|
+| *"it would carry exactly one key"* | it carries the settings layer dotter has never had — merge tool, layout roots, behaviour flags. The one-key version deserved rejecting; this is not that |
+| *"it is the one file dotter could never deploy to itself"* | only if it is **required**. With a `--clone <url>` bootstrap path, nothing needs it to exist first: it is an optimisation, not a prerequisite — so it can be deployed from `files/dotter/dotter.toml` like anything else |
 
-1. **It would carry exactly one key.** Every other setting dotter has — all nine path
-   options — is *repo*-relative by nature and belongs in the repo. A new file format, a new
-   search path and a new precedence layer against nine existing CLI defaults, to hold one
-   string, is not a trade.
-2. **It is the one file dotter could never manage.** The constitution says *nothing
-   hand-written that is not tracked*. This file must exist **before** dotter runs, so dotter
-   cannot deploy it — a genuine bootstrap paradox, and the only such file in the design. The
-   alias has no such problem: it lives in `files/zsh/zshrc`, tracked and deployed like
-   anything else. `.dotter/local.toml` is hand-written too but sits *inside* the repo, so it
-   never needs finding.
-3. **Upstream would not take it**, and the fork does not want to carry a config-file format
-   forever.
+There is also an explicit invitation upstream. SuperCuber, 2021-01-30, on **#51** (verified
+via the API, comment `770217516`), while declining to hardcode a read-only-target behaviour:
+
+> "I'm open to implementing this as a flag though. Maybe it's about time we had a
+> `dotter.toml` for these kinds of settings…"
+
+Five years unanswered. This is the rare case of a feature the maintainer proposed himself.
+
+#### Two files, one job each
+
+The proposal originally had one file in two places with a templated/non-templated fallback.
+Giving each location a distinct job removes that branch entirely:
+
+| file | job | tracked? | templated? |
+|---|---|---|---|
+| `<repo>/dotter.toml` | settings **for this repo** — layout roots, merge tool | yes, in the repo | **never** |
+| `~/.config/dotter/dotter.toml` | **where the repo is**, plus per-machine behaviour | no — it is *deployed* | may be, from `files/dotter/dotter.toml` |
+
+The repo-root file is never templated, because a per-machine setting is by definition not a
+property of the repo — if you want a different merge tool per machine, that belongs in the
+deployed file, rendered from a templated source like any other config. This is what kills the
+*"is it templated? then fall back"* step: the file dotter reads in place is always plain, and
+the templated one is an ordinary `files/` entry that happens to be dotter's own config.
+
+Precedence is git's, which everyone already knows:
+
+```
+compiled-in defaults  <  ~/.config/dotter/dotter.toml  <  <repo>/dotter.toml  <  CLI flags
+```
+
+`repo = "…"` is **global-file-only** — a repo declaring its own location is circular.
+
+**Trap, worth documenting before someone hits it:** `machine` must *not* migrate into
+`dotter.toml`. If the deployed copy is rendered per machine, then knowing the machine is a
+precondition for rendering the file that names the machine. It stays in `.dotter/local.toml`,
+inside the repo, where it is naturally scoped.
+
+**Collision to resolve:** `global.toml` already has a `[settings]` table (`config.rs:89`,
+currently just `default_target_type`). The split that keeps both honest is *content vs tool*
+— `[settings]` governs **how files in this repo are deployed**, `dotter.toml` governs **how
+the tool runs**. Defensible, but it must be stated in the docs or it becomes the next
+question in this thread.
+
+#### Which settings actually earn their place
+
+The mechanism is generic, so every CLI flag comes along free. That is not the same as every
+flag deserving advertisement:
+
+**Earn it — no flag exists today and the value is real:**
+
+- `repo` — the entire reason the global file exists; replaces the `dot` alias and the `-C`
+  flag discussion above
+- `merge.tool` / `merge.args` — Phase 4 needs it and there is nowhere to put it
+- `files_root` / `scripts_root` — Phase 4's layout assertions were already specified as
+  configurable
+- behaviour flags: `force`, `noconfirm`, `diff_context_lines`, `verbosity` — set-once
+  preferences, and **exactly the category SuperCuber was describing** in the quote above
+
+**Come free, do not advertise:** the nine `.dotter/*` path options (`global_config`,
+`local_config`, `cache_file`, `cache_directory`, and the four hook paths). They are settable
+today and nobody changes them.
+
+#### The bootstrap flow
+
+```plantuml
+@startuml
+skinparam defaultTextAlignment left
+start
+if (CWD has dotter.toml?) then (yes)
+  :read it;
+else (no)
+  if (--clone <url> given?) then (yes)
+    :clone once into a temp dir;
+    :read its dotter.toml;
+    :**move** it to the configured location
+    (never a second fetch);
+  else (no)
+    if (~/.config/dotter/dotter.toml has repo?) then (yes)
+      :go there;
+    else (no)
+      :offer init-machine, or defaults;
+    endif
+  endif
+endif
+:init-machine
+(short-circuits if local.toml
+is already valid);
+:deploy;
+stop
+@enduml
+```
+
+Two corrections to the original sketch:
+
+1. **One fetch, not two.** Cloning to `/tmp` and then cloning again to the real location
+   downloads the repo twice. Clone once into a temp directory, read `dotter.toml`, then
+   `mv` the working tree into place.
+2. **The "not a git repo" warning belongs in `doctor`, not on every invocation.** A warning
+   printed on every run is a warning nobody reads. `doctor` is the place that already exists
+   for exactly this class of check.
+
+Everything else in the sketch stands, including reusing `init-machine` as the single entry
+point and short-circuiting when `local.toml` is already valid.
+
+#### Upstream split
+
+Do not send this as one PR. The maintainer is 0-for-5 on feature PRs and same-day on small
+obviously-correct ones:
+
+- **`up/dotter-toml`** — the settings file and the precedence chain, nothing else. Opens by
+  quoting his own comment on #51. This is the half he asked for.
+- **Fork-only** — `--clone`, the temp-clone-and-move, and the `init-machine` routing. It
+  depends on the `inquire` picker, which is fork-only anyway.
 
 #### It does not fix the hook note either
 
