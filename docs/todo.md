@@ -55,6 +55,13 @@ dispatcher are in `docs/DESIGN.md` → *Imperative setup*. The dispatcher needs 
 source change**; write `.dotter/post_deploy.sh` as the template shown there and it works
 today.
 
+`[ ]` **Do not let a script feed a value back into a template** — impossible by design,
+scripts run after rendering. Where a config needs a value only execution can find (the
+`sh.exe` path is the live case), have the *consumer* resolve it at its own runtime so the
+file stays a symlink; only if it cannot compute, have the script write a **generated** file
+the config includes, with a do-not-edit header naming its producer. Full rules in
+`docs/DESIGN.md` → *Variables: authored, discovered, and runtime*.
+
 `[ ]` Convert the existing imperative scripts into `scripts/<package>/` entries. From the
 corpus these are `docs/startup-scripts/setup-certficates.sh` (→ `scripts/certs/`),
 `docs/git-settings.sh`, `docs/startup-scripts/install-init-stuff.sh`,
