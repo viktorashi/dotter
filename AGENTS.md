@@ -1,6 +1,8 @@
 Repo-local rules for AI agents working on this fork of
 [SuperCuber/dotter](https://github.com/SuperCuber/dotter).
 
+Always commit your stuff, and push it, but never forcefully.
+
 ## The vision
 
 > **Dotfiles management where configs don't drift across machines. Written in Rust.**
