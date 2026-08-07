@@ -1663,17 +1663,56 @@ A second axis would be invented schema for something dotter already does — the
 as the discarded `[settings.variants]`, and it would also break the dispatcher, which works
 precisely *because* `dotter.packages` is the injected variable.
 
-### Resolved: dotter must be run from the repo root, and that is fine
+### Resolved: dotter must be run from the repo root
 
-Checked `src/args.rs` in full: there is **no `--directory` / chdir option** (`-d` is
-`--dry-run`). Every path defaults to `.dotter/…` relative to CWD, source keys in
-`[pkg.files]` are relative to CWD, and `watch.rs:17` uses `std::env::current_dir()` as the
-watch root. So the CWD requirement is real and undocumented.
+Verified in full: `src/args.rs` has **no** `--directory`/chdir option (`-d` is `--dry-run`).
+All nine path options default to `.dotter/…` relative to CWD; source keys in `[pkg.files]`
+are CWD-relative; `watch.rs:17` uses `std::env::current_dir()`. Nothing calls
+`set_current_dir`. Running elsewhere fails loudly (cannot find `.dotter/global.toml`), so
+nothing is silently wrong.
 
-It is nevertheless benign: run from elsewhere, dotter cannot find `.dotter/global.toml` and
-**fails loudly** rather than misbehaving. The only thing needed is that the convenience
-alias carries the `cd` — `dot='(cd ~/.dotfiles && dotter)'`, subshell so the caller's CWD is
-untouched. No source change, nothing to upstream.
+The fix is the alias `dot='(cd ~/.dotfiles && dotter)'` — a subshell, so the caller's CWD is
+untouched. No source change.
+
+#### Rejected: a global config at `~/.config/dotter/dotter.toml`
+
+Verified there is none today — no `dirs`/`directories` dependency, no XDG lookup, no
+`$HOME`-relative path anywhere in `src/`. Everything is CWD-relative by construction.
+
+It was considered as a way to record where the dotfiles repo lives. Rejected on three
+counts:
+
+1. **It would carry exactly one key.** Every other setting dotter has — all nine path
+   options — is *repo*-relative by nature and belongs in the repo. A new file format, a new
+   search path and a new precedence layer against nine existing CLI defaults, to hold one
+   string, is not a trade.
+2. **It is the one file dotter could never manage.** The constitution says *nothing
+   hand-written that is not tracked*. This file must exist **before** dotter runs, so dotter
+   cannot deploy it — a genuine bootstrap paradox, and the only such file in the design. The
+   alias has no such problem: it lives in `files/zsh/zshrc`, tracked and deployed like
+   anything else. `.dotter/local.toml` is hand-written too but sits *inside* the repo, so it
+   never needs finding.
+3. **Upstream would not take it**, and the fork does not want to carry a config-file format
+   forever.
+
+#### It does not fix the hook note either
+
+Separate concern, easily conflated. The note on `.dotter/post_deploy.sh` — *reference paths
+relative to the repo root, not to `$0`* — exists because **only the hook file itself is
+copied into `.dotter/cache/`** (`hooks.rs`), so `$0` resolves inside the cache directory
+where its siblings do not exist. That is true no matter what CWD is or how it was reached.
+A global config, a chdir flag and the alias all leave it exactly as it is.
+
+#### The one rung above the alias, if it is ever needed: `-C`
+
+Not a global config — a `--directory`/`-C` flag, one `set_current_dir` at the top of `main`,
+the convention `git -C` and `make -C` already established. ~5 lines, plausibly the
+same-day-merge bucket upstream.
+
+**Not built, because the one-liner works.** The trigger is needing a *third* copy of the
+alias: it is one line in `zshrc`, but a PowerShell function and a `.bat` are two more, and at
+that point 5 lines of Rust that work in every context (including systemd units and scripts)
+is the smaller thing. Record instances here; the first non-shell caller justifies it.
 
 ### Decided: directories expand by default, and the alternative loses templating
 

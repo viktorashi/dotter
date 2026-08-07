@@ -121,7 +121,10 @@ and 5.
 
 `[ ]` Define `dot` as `(cd ~/.dotfiles && dotter)` — a subshell, so the caller's CWD is
 untouched. Dotter has no chdir flag and resolves every path from CWD; it fails loudly
-elsewhere, so the alias is the whole fix.
+elsewhere, so the alias is the whole fix. A global config at `~/.config/dotter/` was
+considered and **rejected** — it would hold one key and is the only file dotter could never
+deploy to itself. A `-C` flag is the rung above, deliberately not built; both with reasons in
+`docs/DESIGN.md` → *Resolved: dotter must be run from the repo root*.
 
 `[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
 composition only, **zero content templates**. Select with `-l` for now (the `machine`
@@ -441,6 +444,12 @@ building it for him, not for us.
 ---
 
 ## Unscheduled
+
+`[ ]` **Trigger to watch for:** the first *non-shell* caller of dotter (systemd unit, a
+script, PowerShell). One `dot` alias is fine; needing a PowerShell function and a `.bat` too
+means three copies of one line, and a `-C`/`--directory` flag (~5 lines, one
+`set_current_dir` in `main`, the `git -C` convention) becomes the smaller thing. Would be its
+own branch, `up/directory-flag`. Record instances here.
 
 `[ ]` File the two upstream issues: the expansion-before-`if` ordering bug (unreported,
 verified), and the `${VAR:fallback}` vs `${VAR:-fallback}` doc error from #86.
