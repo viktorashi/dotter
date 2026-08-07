@@ -379,6 +379,99 @@ of the same conflict.
 > conflicting files*. Committing it commits config snippets. Fine for dotfiles;
 > dangerous if a conflict ever occurs in a file containing a credential.
 
+## The rendered artifact: tracked, and linked like everything else
+
+This is the piece that makes the constitution hold **without an exception for templates**.
+
+### The problem, restated
+
+A symlinked file round-trips for free: the app edits the destination, the repo file changes,
+`git status` shows it. A **templated** file does not — dotter renders it and `copy_file`s the
+result to the destination (`actions.rs:597`), so the destination is an ordinary file with no
+path home. An app that rewrites it produces exactly upstream issue **#193**:
+
+```
+[ERROR] Updating template ".gitconfig" -> "C:\Users\USER/.gitconfig" but target
+        contents were changed. Skipping.
+```
+
+That is the constitution's forbidden edge-case, in dotter's own error text.
+
+### The fix: render into the repo, then link at the render
+
+```
+files/gitconfig.tmpl          template source            tracked
+  ↓ render
+.dotter/rendered/<machine>/gitconfig    the artifact     TRACKED   ← new
+  ↓ symlink
+~/.gitconfig                            the destination  a link, like everything else
+```
+
+Now every destination on the machine is a link, with no exceptions, and a live edit lands
+in a tracked file with no action from anyone. This is **peridot's trick** (see *Prior art*)
+— the one structurally different answer anybody has shipped — applied to dotter's existing
+cache machinery.
+
+### Why it needs a second directory, not just tracking the cache
+
+The obvious version — track `.dotter/cache/` and symlink the target at it — **destroys drift
+detection**, which is the one thing dotter has that nothing else does. Verified in source:
+
+```rust
+// filesystem.rs:782
+fn compare_template(target_state: FileState, cache_state: FileState) -> TemplateComparison
+```
+
+It compares *target contents* against *cache contents*. If the target **is** the cache file
+they can never differ. Worse, it would not even reach that point: `get_file_state`
+(`filesystem.rs:695`) calls `read_link` first, so a symlinked target returns
+`FileState::SymbolicLink`, which falls through to `_ => TemplateComparison::TargetNotRegularFile`.
+**A symlinked template target is an error state today.**
+
+So three files, each with one job:
+
+| path | job | tracked? |
+|---|---|---|
+| `files/x.tmpl` | the template | yes |
+| `.dotter/cache/<machine>/x` | **the merge base** — what dotter last rendered | no (gitignored) |
+| `.dotter/rendered/<machine>/x` | **the artifact** — what is live, edits land here | **yes** |
+
+Drift is `diff(cache, rendered)`, which is the same comparison `compare_template` already
+performs — it moves from *cache ↔ target* to *cache ↔ artifact*. The target's own check
+becomes "does this link point at the artifact", which is `compare_symlink`, already written.
+**Templates stop having a bespoke deploy path and join the symlink one.**
+
+Machine-keying is not optional: the cache path is `cache_directory.join(source)`
+(`deploy.rs:304`), so two machines sharing a repo would fight over one file on every pull.
+Since `machine` is known (Phase 3), dotter appends it. Deploy becomes:
+
+1. render
+2. compare cache ↔ artifact
+3. **identical** → overwrite artifact with the new render, update cache
+4. **differ** → drift. Three-way merge with base = cache, ours = artifact, theirs = new
+   render — which is Phase 4's `dotter merge`, unchanged except for which file is "ours"
+5. ensure the target links at the artifact (idempotent)
+
+### What this costs, honestly
+
+- **A third root in the repo**, generated but committed. It survives the breadcrumb rule
+  under the *generated files* escape already documented below — derived state is legitimate
+  when its **deriver** is tracked — but it is real: N machines × M templates of committed
+  churn. Cheap only because the measurement says the template set is tiny (~11 genuinely
+  OS-specific lines across the whole corpus). **If Phase 0a finds no templates are needed at
+  all, this whole section is unnecessary** — build it only if 0a produces templates.
+- **Phase 1 is promoted from nice-to-have to blocking.** On Windows without Developer Mode a
+  symlink fails, and a template deployed as a copy has no path home — the exact problem
+  this section exists to remove. The hard-link fallback round-trips (same inode, verified
+  with `same-file`), so it is a real fallback and not a degradation. **This must not ship
+  before `up/windows-link-fallback`.**
+- **The cache stops being disposable.** Upstream treats it as throwaway; here a target links
+  into `rendered/`, so deleting that tree dangles every templated destination. Fork-only
+  semantics — do **not** try to upstream this.
+- It does **not** make write-back automatic. The edit is now *safe and visible*; getting it
+  back into the template is still the manual v1 flow below. That is the whole point: the
+  urgency disappears because nothing is lost, so a hint plus a human is sufficient.
+
 ## The new part: branch classification
 
 Getting a merged *output* back into a `.hbs` requires inverting the render. Handlebars is
@@ -1416,6 +1509,88 @@ dotter setup-git → git config rerere.enabled true
 ```
 
 Fresh system → `dotter deploy` → one prompt → configured.
+
+`setup-git` is also where `core.hooksPath` / `prek install` lands — see below.
+
+### Reconciliation: when it runs, and what runs it
+
+Once the render is a tracked artifact, **an unreconciled edit is no longer urgent** — it is
+sitting safely in git. What is left to prevent is *forgetting*: committing a changed
+artifact whose template did not change means the edit will not survive a re-render on any
+other machine. That is a precise, checkable assertion:
+
+> for each `.dotter/rendered/<machine>/x` staged for commit, if it differs from a fresh
+> render of its template, the template is stale — block, and name `dotter merge`.
+
+**Commit time is the right moment**, not deploy time and not push time. Deploy is when
+things go *out*; the capture already happened via the symlink. Push is too late — the
+history would already contain a commit that claims a truth it does not have. Commit is
+where the repo asserts "this is what this machine is".
+
+#### Is a hook runner justified for one hook? On its own, no.
+
+The lazy answer is native git: `git config core.hooksPath .githooks` plus one tracked
+`.githooks/pre-commit`. Zero dependencies, and `dotter setup-git` already exists to set it.
+`.git/hooks/` is untracked, so a hand-written hook there would violate *nothing
+hand-written that is not tracked* — `core.hooksPath` is the fix for that, and it is one
+line.
+
+**`prek` is nonetheless the right call, but not for the reconciliation hook** — that is the
+weakest reason to adopt it. It is justified by repo-integrity checks this corpus has
+*already* been measured to need, all of which are `prek`'s Rust-native `repo = "builtin"`
+hooks: offline, no Python, no network, no per-hook environment to build.
+
+| builtin hook | the problem it catches, measured in this repo |
+|---|---|
+| `destroyed-symlinks` | **the decisive one.** `arch-wsl` tracks a real symlink (mode `120000`, `.config/systemd/user/default.target.wants/agents-render.path`). Checked out by a git that cannot make symlinks — which is the default on Windows — it becomes a text file containing the path, and committing that **silently destroys it**. For a repo whose entire purpose is symlinks, used on Windows, this is a live hazard |
+| `check-symlinks` | catches a committed symlink that dangles |
+| `detect-private-key` | the repo is **public** and the *Secrets* gap below is still open |
+| `check-added-large-files` | `windows10` carries a 1.28 MB `autohotkeys.exe` |
+| `mixed-line-ending` | CRLF `.bat` files beside LF `.sh` in one cross-platform tree |
+| `check-illegal-windows-names` | a tree deployed on Windows must not contain `aux`, `con`, `:` |
+
+Given that set, the reconciliation check rides along free as a `repo = "local"` hook, and
+`prek.toml` is a tracked file at the repo root like any other config:
+
+```toml
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "destroyed-symlinks" },
+  { id = "check-symlinks" },
+  { id = "detect-private-key" },
+  { id = "check-added-large-files" },
+  { id = "mixed-line-ending" },
+  { id = "check-illegal-windows-names" },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+  { id = "dotter-reconcile", name = "templates match their renders",
+    language = "system", entry = "dotter reconcile --check",
+    files = "^\\.dotter/rendered/" },
+]
+```
+
+**Dependency posture: optional, exactly like mergiraf.** `bootstrap/` still installs only
+`git` + `dotter`. `dotter setup-git` runs `prek install` if `prek` is on `PATH` and prints a
+one-line note if it is not. A machine that only *deploys* never needs it; a machine where
+you *author* can install a single Rust binary. A required hook runner would break
+*bootstrap from nothing*.
+
+#### What this does and does not depend on
+
+The user's instinct that this leans on `dotter.toml` is **half right**, and it is worth
+being exact about which half:
+
+- `prek.toml` — **no dependency.** It is prek's own tracked config at the repo root.
+- `.gitattributes`, `merge.mergiraf.driver`, `rerere.enabled`, `core.hooksPath` — **no
+  dependency.** All are `dotter setup-git`, which is Phase 4 and predates `dotter.toml`.
+- the `rendered` root, and `files_root` / `scripts_root` — **yes.** These are repo layout,
+  which is precisely the `<repo>/dotter.toml` half of Phase 3b. They cannot be CLI flags
+  (nobody would type them) and they cannot go in `global.toml` `[settings]`, which governs
+  how files are deployed rather than how the tool is laid out.
 
 ## Recon log — assumptions tested against a running binary
 

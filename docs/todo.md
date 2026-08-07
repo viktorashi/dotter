@@ -378,6 +378,68 @@ trigger for `-C` once this lands.
 
 ---
 
+## Phase 3c — the rendered artifact becomes tracked and linked  → fork-only
+
+**Gated on Phase 0a finding that templates are needed at all.** The measurement says ~11
+genuinely OS-specific lines in the whole corpus; if reconciliation removes all of them, this
+phase is unnecessary and must not be built. Design: `docs/DESIGN.md` → *The rendered
+artifact: tracked, and linked like everything else*.
+
+**Blocked on Phase 1.** On Windows without Developer Mode a symlink fails and the template
+falls back to a copy — the exact problem this phase removes. Do not ship before
+`up/windows-link-fallback`.
+
+`[ ]` Render to `.dotter/rendered/<machine>/<source>` (tracked) in addition to
+`.dotter/cache/<machine>/<source>` (gitignored, the merge base). Machine-key both — the
+path is `cache_directory.join(source)` (`deploy.rs:304`) and two machines sharing a repo
+would otherwise fight over one file on every pull. `machine` is known from Phase 3.
+
+`[ ]` Symlink the target at the artifact instead of `copy_file` (`actions.rs:597`).
+Templates then join the symlink deploy path.
+
+`[ ]` **Move the content comparison from cache↔target to cache↔artifact.** Required, not
+cosmetic: `get_file_state` (`filesystem.rs:695`) calls `read_link` first, so a symlinked
+target returns `FileState::SymbolicLink` and `compare_template` (`filesystem.rs:782`) falls
+through to `_ => TargetNotRegularFile`. **A symlinked template target is an error state
+today.** The target's own check becomes `compare_symlink`.
+
+`[ ]` Note in the docs that the cache stops being disposable — a target links into
+`rendered/`, so deleting that tree dangles every templated destination. Fork-only semantics;
+**do not attempt to upstream this.**
+
+`[ ]` Add `rendered_root` alongside `files_root` / `scripts_root` in `<repo>/dotter.toml`
+(Phase 3b), and the corresponding `doctor` assertion.
+
+---
+
+## Phase 3d — reconciliation hook via `prek`  → fork-only
+
+Design: `docs/DESIGN.md` → *Git setup* → *Reconciliation: when it runs, and what runs it*.
+
+`[ ]` Tracked `prek.toml` at the dotfiles repo root with the six `repo = "builtin"` hooks.
+The decisive one is **`destroyed-symlinks`**: `arch-wsl` tracks a real symlink (mode
+`120000`, `.config/systemd/user/default.target.wants/agents-render.path`), and a git that
+cannot make symlinks — the Windows default — turns it into a text file that a commit then
+destroys silently.
+
+`[ ]` `dotter reconcile --check` as a `repo = "local"` hook scoped to
+`files = "^\.dotter/rendered/"`: for each staged artifact, if it differs from a fresh
+render of its template, the template is stale — block and name `dotter merge`.
+
+`[ ]` Commit time, not deploy or push. Deploy is when things go out and the capture already
+happened via the symlink; push is too late because the history would already claim a truth
+it does not have.
+
+`[ ]` `dotter setup-git` gains `core.hooksPath` and runs `prek install` **if prek is on
+PATH**, printing a one-line note otherwise. **Optional dependency, exactly like mergiraf** —
+`bootstrap/` still installs only `git` + `dotter`, or *bootstrap from nothing* breaks.
+
+`[ ]` prek is not installed on this host (`command -v prek` → missing). Install before
+writing the config, and verify with `prek validate-config` + `prek run --all-files` against
+the corpus clone, which should immediately flag the 1.28 MB `autohotkeys.exe` and any CRLF.
+
+---
+
 ## Phase 4 — `dotter merge` + `dotter setup-git`  → gated on Phase 0a
 
 `[ ]` On `TemplateComparison::Changed`, emit the 3-way (base = `.dotter/cache/`,
