@@ -796,6 +796,125 @@ the fallback is reading one line out of the justfile. Verified here: `just` 1.45
 `import? "file.just"` (optional import — no error when absent), so per-machine recipes are
 possible later without templating the justfile. Not built now; nothing needs it yet.
 
+## Variables: authored, discovered, and runtime
+
+The word "variable" is doing three different jobs, and conflating them is what makes this
+feel unsolvable. Separate them and the confusion goes away.
+
+| kind | known when | who supplies it | example |
+|---|---|---|---|
+| **authored** | when you commit | you, in a machine or package file | `config_dir`, `theme = "dark"` |
+| **discovered** | when dotter runs | dotter itself, or the environment | `dotter.windows`, `$APPDATA` |
+| **runtime** | only by executing something | a script, or the app itself | the path `where git` prints |
+
+Dotter's `[variables]` is **only the first kind**. That is not a gap.
+
+### Why runtime values can never become dotter variables
+
+Dotter is a single pass, in this order (`src/deploy.rs`):
+
+```plantuml
+@startuml
+skinparam defaultTextAlignment center
+(*) --> "load config\n(global + machine)"
+--> "build handlebars\n(inject dotter.*)"
+--> "render templates"
+--> "deploy files"
+--> "run post_deploy.sh\n-> scripts/<package>/*.sh"
+--> (*)
+note right of "run post_deploy.sh\n-> scripts/<package>/*.sh"
+  Scripts run LAST.
+  Every template is already
+  rendered and on disk.
+  Nothing flows back.
+end note
+@enduml
+```
+
+By the time a script executes, rendering is finished. There is no second pass, and adding
+one would mean a script could change what a template rendered to — deploys would stop being
+reproducible from the repo alone, which is the property the whole project exists to protect.
+
+So the answer to *"what do we do with the values found at runtime?"* is: **do not put them
+in a template.** Three rungs, in order.
+
+### Rung 1 — most "runtime" values are authored values you did not write down
+
+`config_dir` on Windows is `%APPDATA%`. That is not discovered, it is a **fact about that
+machine**, and the machine file is exactly where facts about a machine live:
+
+```toml
+# .dotter/machines/win-work.toml
+[variables]
+config_dir = "${APPDATA:-/nonexistent}"
+```
+
+Your instinct — *"we are composing machines as: the value of this variable is THIS"* — is
+correct, and it covers most cases. The fear that every machine needs different values is the
+system **working**: that is where difference is supposed to be visible.
+
+### Rung 2 — let the environment resolve it at deploy time
+
+Dotter already injects `dotter.os`, `dotter.windows/linux/macos/unix`, `dotter.hostname`,
+`dotter.current_dir`, `dotter.packages`. With PR #190 (Phase 2), `${ENV_VAR:-fallback}`
+resolves in target paths too. Nothing to author, nothing to script. `${APPDATA}` read live
+is also *more* correct than a hardcoded `~/AppData/Roaming` — it survives GPO Folder
+Redirection and OneDrive Known Folder Move.
+
+### Rung 3 — if only execution can find it, the **consumer** resolves it, not the template
+
+This is the one that actually answers the question.
+
+The Git-Bash case is the live example: `sh.exe` is not on `PATH`, and its location is only
+knowable by running `where git`. The wrong fix is to have a template bake the discovered path
+into `.zshrc`. The right fix is for `.zshrc` to resolve it **when the shell starts**.
+
+Why that is not merely equivalent:
+
+- A baked-in path is **stale the moment git moves**, and *nothing tells you* — the file
+  looks fine and is wrong. That is drift, manufactured deliberately.
+- A file that resolves its own values needs no rendering, so it stays a **symlink**, so it
+  round-trips for free — *prefer a link over a rendered copy*.
+- Rendering it to hold one discovered string converts a free file into the hard case, and
+  buys nothing.
+
+**Rule: a value that can go stale must never be baked into a rendered file.** Config formats
+that cannot compute (`.json`, `.toml`) are the awkward ones — prefer an app-native include
+pointing at a generated file, per below.
+
+### The one legitimate escape: generated files
+
+Sometimes a script genuinely must hand a value to a config that cannot compute it. Then the
+script writes a **separate generated file** which the config *includes at its own runtime* —
+it never writes into the repo and never patches a deployed file:
+
+```
+scripts/certs/10-trust.sh   ->  writes ~/.config/zsh/generated.zsh
+files/zsh/zshrc             ->  [ -f ~/.config/zsh/generated.zsh ] && . $_
+```
+
+This does not violate *nothing leaves the repo without a breadcrumb back*, but only because
+the rule is about **authored** state. Derived state needs its **deriver** tracked, and the
+script is in the repo. Two conditions make that hold, and they are not optional:
+
+1. The generated file carries a header naming the script that produced it and saying **do not
+   edit** — you edit the script, never the output.
+2. It is reproducible: deleting it and re-deploying restores it exactly.
+
+Anything that fails either condition is authored state wearing a disguise, and belongs in
+`files/`.
+
+### Mechanics, verified in `merge_configuration_files` (`config.rs:280-422`)
+
+- Package variables merge into one namespace. **Two packages defining the same scalar name is
+  a hard error** — `variable "X" already encountered` (`config.rs:355`). Tables merge
+  recursively instead of colliding.
+- Machine (`local.toml`) variables are applied **last** and override everything, via
+  `recursive_extend_map` (`config.rs:409`).
+- Measured with PR #190: a config variable **beats** an environment variable of the same
+  name; a name defined nowhere is a **hard error that aborts config loading**, so every
+  environment variable used in a target needs `:-fallback`.
+
 ## Multi-target: dropped
 
 **Superseded by a clarified requirement.** Earlier drafts treated "one source, many
