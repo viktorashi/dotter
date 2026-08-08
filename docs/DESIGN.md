@@ -1180,10 +1180,23 @@ Two things it must get right:
 
 - **`target = ""` is the disable form** and must be excluded before comparing, or every
   legitimate disable reads as a collision.
-- **Containment, not equality.** `~/.config/nvim` deployed as a whole-directory link and
-  `~/.config/nvim/lua/keys.lua` deployed as its own entry are different targets that
-  overlap. That is precisely the combination that destroyed a source file in Phase 0c, so
-  the comparison is "is one target a prefix of the other", not "are they equal".
+- **Containment, not equality — but only under a whole-directory link.** A target inside
+  another target is an error *when the outer entry is deployed as one link*
+  (`recurse = false`). That is the combination that destroyed a source file in Phase 0c.
+  Under `recurse = true` there is no containing link at all — dotter creates a real
+  directory and one link per file, and a more specific entry for a file inside it works
+  correctly, source untouched. So the comparison is "is this target inside a target that is
+  itself a single link", not a bare prefix test.
+
+  There is no link type for which the combination is meaningful, so this is a rejection, not
+  a thing to support:
+
+  | outer link type | an inner write goes | result |
+  | --- | --- | --- |
+  | unix symlink to a directory | through the link | lands in the repository |
+  | Windows junction | through the link | lands in the repository |
+  | Windows hard link | n/a | directories cannot be hard-linked |
+  | copy fallback | into the copy | the inner entry is silently ignored |
 
 Fork-only, and gated on Phase 3 — dotter has no concept of `.dotter/machines/` until
 `up/machine-field` lands. Not upstreamable: upstream has no machine files to iterate.
