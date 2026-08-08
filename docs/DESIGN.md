@@ -400,22 +400,55 @@ link points at**:
 
 A copy is the only deploy with no path home, so it stops being something you can *choose*.
 
-### What that deletes, precisely
+### The two axes `type` conflates
 
-`type = "template"` is not a property of the *target*, it is a property of the **source** —
-which is why it always sat wrong. With `.tmpl` naming (below) the discriminant is the
-source's own name, so `FileTarget::{Symbolic, ComplexTemplate}` collapses to one struct.
+The reason "a template that is *also* symlinked" cannot be expressed today is not a missing
+feature. It is that one word is doing two unrelated jobs:
 
-But the *complex target field does not disappear*, and it is worth being exact, because the
-fields are not interchangeable:
+| axis | question | today | discovered or declared? |
+| --- | --- | --- | --- |
+| **what the source is** | plain file, template, directory | `type = "template"` | **discovered** — `is_template` sniffs the bytes |
+| **how the target attaches** | symlink, hard link, junction, copy | `type = "symbolic"` | declared, but only ever as one value |
+
+`type` is a single enum spanning both, so choosing one value forecloses the other. That is
+the entire bug. `type = "symbolic"` does not mean "attach by symlink" — it means "do **not**
+template this", and the link kind just rides along. Confirmed by the maintainer's own
+answer in **#192**, where `type = "symbolic"` is prescribed purely as the anti-template
+escape hatch.
+
+**The fix is a second field, not a reinterpretation of the first:**
+
+```toml
+"nvim/init.lua.tmpl" = { target = "~/.config/nvim/init.lua", link = "hard" }
+```
+
+- `link = "symbolic" | "hard" | "copy"` — how the target attaches. Orthogonal to
+  templateness, so a template can be hard-linked at its render. Absent → automatic.
+- Templateness comes from the source: `.tmpl`, else the heuristic.
+
+**Backwards compatibility is why `type` must not be repurposed.** Reinterpreting
+`type = "symbolic"` as "attach by symlink" would silently *start* templating every file
+that was using it as the anti-template escape hatch — i.e. exactly the users who hit #192
+and followed the maintainer's advice, whose configs contain `{{`, and whose renders would
+be mangled rather than erroring. So:
+
+- `type` keeps its present meaning for as long as it exists. It is deprecated, not
+  reassigned.
+- The deprecation warning must name **both** replacements, because one old value maps to
+  each axis: `type = "template"` → rename the source to `.tmpl`; `type = "symbolic"` →
+  rename the source *away* from `.tmpl` (and add `link = "symbolic"` only if the link kind
+  actually matters).
+
+Everything else on the target survives untouched — `owner`, `if`, `recurse` are real, and
+`append`/`prepend` remain template-only text actions:
 
 ```rust
 SymbolicTarget { target, owner, recurse, condition }   // config.rs:29
 TemplateTarget { target, owner, append, prepend, condition }
 ```
 
-`owner`, `if`, `recurse` are real and survive. `append`/`prepend` are template-only text
-actions and survive as source-side options. **Only the `type` discriminant dies.**
+One struct with every field optional is trivially backwards compatible under serde. **Only
+the `type` discriminant is retired**, and only after `link` and `.tmpl` both exist.
 
 ### Where copy has to survive anyway — two cases, and neither is a preference
 
@@ -451,13 +484,51 @@ honest to match on.
 
 The heuristic it replaces is a live footgun. `filesystem::is_template` (`filesystem.rs:821`)
 reports *any* UTF-8 file **containing `{{`** as a template. In a dotfiles repo that silently
-captures Vue and Angular components, Jinja and mustache files, LaTeX macros, and — with
-perfect irony — the `prek.toml` and hook templates this project is about to add. They get
-rendered, and either error out or are corrupted.
+captures Vue and Angular components, Jinja and mustache files, LaTeX macros, vim fold
+markers (`{{{`), and — with perfect irony — the `prek.toml` and hook templates this project
+is about to add.
 
-Migration is additive, not breaking: keep the heuristic, add `.tmpl` as an explicit
-override, warn when the heuristic fires on a file *not* named `.tmpl`. The warning is a
-small, obviously-correct, real-bug PR on its own — a candidate `up/template-detection`.
+#### Already filed upstream, twice, and closed both times
+
+Do not open this as a new feature request. Checked against the tracker:
+
+- **#20 "[FEATURE] Explicitly indicate if the file is a template or not"** (mnivoliez,
+  2020-10-31, **closed**). Opening line: *"Some file are recognized as template when they
+  are not."* The reporter asked the exact design question — should detection be opt-in or
+  opt-out? SuperCuber: *"I think I will keep the current behavior since it will make it work
+  in most cases, and the cases that don't work you can override it."* Closed by merging into
+  #18, the complex-target work — which is where `type = "symbolic"` came from. **So the
+  escape hatch already exists and the maintainer considers the matter settled.**
+- **#192 "[BUG] Failed to parse template … expected trailing_tilde_to_omit_whitespace"**
+  (conanlm, 2025-01, **closed**). A yazi `theme.toml` with vim fold markers. SuperCuber:
+  *"Dotter detected `{` characters in the file therefore it's trying to use templating on
+  it. To force it to use a simple symbolic link, use `type = "symbolic"`."* Working as
+  designed, in his view.
+
+#### What is *not* filed, and is worth filing
+
+The detection is **asymmetric**, and that asymmetry is a real bug rather than a design
+preference. From `filesystem.rs:821-838`:
+
+```rust
+if file.read_to_string(&mut buf).is_err() {
+    warn!("File {:?} is not valid UTF-8 - detecting as symlink. Explicitly specify it to silence this message.", source);
+    Ok(false)
+} else {
+    Ok(buf.contains("{{"))       // ← silent
+}
+```
+
+The **negative** detection warns and tells you how to silence it. The **positive** detection
+says nothing at all. So a false positive surfaces only as a downstream handlebars parse
+error pointing at a line the user did not write (#192) — or, if the file happens to be
+*valid* handlebars, it does not surface at all and the deployed config is silently wrong.
+
+The fix is one symmetric `warn!` reusing his own wording, plus `.tmpl` as the way to silence
+it. One concern, real bug, obviously correct — the same-day-merge bucket. That is
+`up/template-detection`, and it stands **regardless of whether Phase 0a leaves any templates
+in the corpus at all**: the bug is upstream's, not ours, and it bites anyone whose config
+contains `{{{`.
 
 ## The cache *is* the artifact, and git is the merge base
 
