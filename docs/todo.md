@@ -133,12 +133,21 @@ target resolves *through* the symlink back to its own source.
   `read template source file / read from file / No such file or directory (os error 2)`.
   The repo file was gone.
 
-`[ ]` Guard in `src/actions.rs`: before deleting/overwriting a target, refuse if it is the
-same file as the source. Use the `same-file` crate — already required by Phase 1, so no new
-dependency.
+`[x]` Guard in `src/actions.rs`: `check_not_self(source, target)` on both `create_template`
+and `update_template`, using the `same-file` crate — already in `Cargo.lock` transitively,
+so no new crate is compiled. **Not** applied to the symlink paths: there, target-is-source
+is the desired end state and `is_same_file` is true for a correctly deployed link.
 
-`[ ]` Test in the Phase 0b corpus: whole-dir symlink + inner template + `--force` must fail
-without touching the source.
+`[x]` Unit test `actions::test::self_overwrite_guard` — distinct files pass, a path alias
+of the same file fails, a target resolving through a directory symlink fails, a missing
+target passes.
+
+`[x]` Verified against the release binary: the original repro now errors out and the source
+file survives; a normal template + symlink deploy/redeploy/undeploy is unaffected;
+`cargo test`, `cargo clippy --all-targets` and `cargo fmt --check` clean.
+
+Branch `up/self-overwrite-guard` cut from `origin/master`, pushed to the fork. **DONE, PR
+not yet opened.**
 
 Small, obviously correct, data-loss class — the bucket this maintainer merges same-day. Cut
 from `origin/master`, independent of every other branch.
