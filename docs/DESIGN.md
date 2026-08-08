@@ -379,98 +379,262 @@ of the same conflict.
 > conflicting files*. Committing it commits config snippets. Fine for dotfiles;
 > dangerous if a conflict ever occurs in a file containing a credential.
 
-## The rendered artifact: tracked, and linked like everything else
+## One abstraction: everything deployed is a link
 
-This is the piece that makes the constitution hold **without an exception for templates**.
-
-### The problem, restated
-
-A symlinked file round-trips for free: the app edits the destination, the repo file changes,
-`git status` shows it. A **templated** file does not — dotter renders it and `copy_file`s the
-result to the destination (`actions.rs:597`), so the destination is an ordinary file with no
-path home. An app that rewrites it produces exactly upstream issue **#193**:
+### The rule
 
 ```
-[ERROR] Updating template ".gitconfig" -> "C:\Users\USER/.gitconfig" but target
-        contents were changed. Skipping.
+source --link--> target
 ```
 
-That is the constitution's forbidden edge-case, in dotter's own error text.
+There is no second kind of deploy. The only question a file entry answers is **what the
+link points at**:
 
-### The fix: render into the repo, then link at the render
+| source | the link points at | who edits it |
+| --- | --- | --- |
+| a plain file | `files/x` | you, or the app — either way it lands in the repo |
+| a template | its render in `.dotter/cache/<machine>/x` | the app; you edit the `.tmpl` |
+| a directory | `files/x/` | the app, including files it invents |
 
-```
-files/gitconfig.tmpl          template source            tracked
-  ↓ render
-.dotter/rendered/<machine>/gitconfig    the artifact     TRACKED   ← new
-  ↓ symlink
-~/.gitconfig                            the destination  a link, like everything else
-```
+A copy is the only deploy with no path home, so it stops being something you can *choose*.
 
-Now every destination on the machine is a link, with no exceptions, and a live edit lands
-in a tracked file with no action from anyone. This is **peridot's trick** (see *Prior art*)
-— the one structurally different answer anybody has shipped — applied to dotter's existing
-cache machinery.
+### What that deletes, precisely
 
-### Why it needs a second directory, not just tracking the cache
+`type = "template"` is not a property of the *target*, it is a property of the **source** —
+which is why it always sat wrong. With `.tmpl` naming (below) the discriminant is the
+source's own name, so `FileTarget::{Symbolic, ComplexTemplate}` collapses to one struct.
 
-The obvious version — track `.dotter/cache/` and symlink the target at it — **destroys drift
-detection**, which is the one thing dotter has that nothing else does. Verified in source:
+But the *complex target field does not disappear*, and it is worth being exact, because the
+fields are not interchangeable:
 
 ```rust
-// filesystem.rs:782
-fn compare_template(target_state: FileState, cache_state: FileState) -> TemplateComparison
+SymbolicTarget { target, owner, recurse, condition }   // config.rs:29
+TemplateTarget { target, owner, append, prepend, condition }
 ```
 
-It compares *target contents* against *cache contents*. If the target **is** the cache file
-they can never differ. Worse, it would not even reach that point: `get_file_state`
-(`filesystem.rs:695`) calls `read_link` first, so a symlinked target returns
-`FileState::SymbolicLink`, which falls through to `_ => TemplateComparison::TargetNotRegularFile`.
-**A symlinked template target is an error state today.**
+`owner`, `if`, `recurse` are real and survive. `append`/`prepend` are template-only text
+actions and survive as source-side options. **Only the `type` discriminant dies.**
 
-So three files, each with one job:
+### Where copy has to survive anyway — two cases, and neither is a preference
 
-| path | job | tracked? |
-|---|---|---|
-| `files/x.tmpl` | the template | yes |
-| `.dotter/cache/<machine>/x` | **the merge base** — what dotter last rendered | no (gitignored) |
-| `.dotter/rendered/<machine>/x` | **the artifact** — what is live, edits land here | **yes** |
+Abolishing copy outright is wrong. There are situations where no link is physically or
+safely possible:
 
-Drift is `diff(cache, rendered)`, which is the same comparison `compare_template` already
-performs — it moves from *cache ↔ target* to *cache ↔ artifact*. The target's own check
-becomes "does this link point at the artifact", which is `compare_symlink`, already written.
-**Templates stop having a bespoke deploy path and join the symlink one.**
+1. **Cross-volume on Windows without Developer Mode.** The Phase 1 fallback is a hard link,
+   and hard links **cannot cross volumes**. Repo on `C:`, target on `D:` → symlink refused
+   (no admin), hard link impossible. Junctions cross volumes but only for directories.
+2. **Root-owned system files.** A symlink at `/etc/sudoers` or an sshd config pointing into
+   a user-writable `$HOME` is a privilege-escalation vector, and the daemons that care
+   check ownership of the *resolved* file, not the link. `owner = "root"` does not fix this
+   — it makes the link root-owned while the content stays user-writable.
+   > **Asserted, not verified.** Needs a recon item: does sudo/sshd actually reject a
+   > symlinked config resolving to a user-writable file? Do not write this up as fact until
+   > it has been run.
 
-Machine-keying is not optional: the cache path is `cache_directory.join(source)`
-(`deploy.rs:304`), so two machines sharing a repo would fight over one file on every pull.
-Since `machine` is known (Phase 3), dotter appends it. Deploy becomes:
+So: **copy is a fallback, never a choice, and it is always loud.** Deploy reports it, the
+cache records it, and `doctor` lists every copied path as a known breadcrumb-less file. That
+satisfies the constitution's real intent — no *silent* edge-case — without pretending
+physics is negotiable.
 
-1. render
-2. compare cache ↔ artifact
-3. **identical** → overwrite artifact with the new render, update cache
-4. **differ** → drift. Three-way merge with base = cache, ours = artifact, theirs = new
-   render — which is Phase 4's `dotter merge`, unchanged except for which file is "ours"
-5. ensure the target links at the artifact (idempotent)
+### `.tmpl`, and why the current detection is a hazard
 
-### What this costs, honestly
+Templateness is declared by the source filename; deploying strips the extension:
 
-- **A third root in the repo**, generated but committed. It survives the breadcrumb rule
-  under the *generated files* escape already documented below — derived state is legitimate
-  when its **deriver** is tracked — but it is real: N machines × M templates of committed
-  churn. Cheap only because the measurement says the template set is tiny (~11 genuinely
-  OS-specific lines across the whole corpus). **If Phase 0a finds no templates are needed at
-  all, this whole section is unnecessary** — build it only if 0a produces templates.
-- **Phase 1 is promoted from nice-to-have to blocking.** On Windows without Developer Mode a
-  symlink fails, and a template deployed as a copy has no path home — the exact problem
-  this section exists to remove. The hard-link fallback round-trips (same inode, verified
-  with `same-file`), so it is a real fallback and not a degradation. **This must not ship
-  before `up/windows-link-fallback`.**
-- **The cache stops being disposable.** Upstream treats it as throwaway; here a target links
-  into `rendered/`, so deleting that tree dangles every templated destination. Fork-only
-  semantics — do **not** try to upstream this.
-- It does **not** make write-back automatic. The edit is now *safe and visible*; getting it
-  back into the template is still the manual v1 flow below. That is the whole point: the
-  urgency disappears because nothing is lost, so a hint plus a human is sufficient.
+```
+files/gitconfig.tmpl  →  render  →  ~/.gitconfig
+```
+
+Editors get a usable hint, greps are trivial, and the `prek` scope regex has something
+honest to match on.
+
+The heuristic it replaces is a live footgun. `filesystem::is_template` (`filesystem.rs:821`)
+reports *any* UTF-8 file **containing `{{`** as a template. In a dotfiles repo that silently
+captures Vue and Angular components, Jinja and mustache files, LaTeX macros, and — with
+perfect irony — the `prek.toml` and hook templates this project is about to add. They get
+rendered, and either error out or are corrupted.
+
+Migration is additive, not breaking: keep the heuristic, add `.tmpl` as an explicit
+override, warn when the heuristic fires on a file *not* named `.tmpl`. The warning is a
+small, obviously-correct, real-bug PR on its own — a candidate `up/template-detection`.
+
+## The cache *is* the artifact, and git is the merge base
+
+The second directory proposed in the previous revision is **retracted.** It was an
+invention where an installed tool already answers.
+
+```
+.dotter/cache/<machine>/x
+```
+
+is tracked, is what the target links at, and is where the app's live edits land. There is no
+`.dotter/rendered/`. The three-way merge reads:
+
+| input | where it comes from |
+| --- | --- |
+| **base** — what dotter last rendered | `git show HEAD:.dotter/cache/<machine>/x` |
+| **ours** — what is live now | the working-tree file (the app wrote through the link) |
+| **theirs** — what the template says now | a fresh render |
+
+"Did it drift?" is `git diff --quiet -- .dotter/cache/<machine>/x`. Nothing to store,
+nothing to invalidate, and it is the reason the mergiraf/rerere machinery is relevant at all:
+these are literally git merges on git-tracked files.
+
+**The guard that makes it sound**: dotter checks git-dirtiness *before* writing a render. A
+dirty cache entry means an unabsorbed edit, so writing over it would destroy exactly what
+this design exists to preserve. Clean → write. Dirty → merge. An untracked entry is a first
+deploy → write.
+
+### Machine-keying is mandatory, not an optimisation
+
+The path is `cache_directory.join(source)` (`deploy.rs:304`). Two machines committing
+different renders of one template to one path is a permanent conflict on every pull. So the
+cache gains a `<machine>` component (known from Phase 3).
+
+That *is* a `cache.toml`-adjacent change, so it needs a version bump and a migration that
+moves the tree — the rule in `AGENTS.md` is not optional. It is also why this is
+**permanently fork-only**: upstream treats the cache as disposable, and here a target links
+into it.
+
+### The cost nobody should discover later
+
+**Renders become public.** Today the render exists only in a gitignored cache. Tracking it
+means the *output* of every template is committed — so a template that ever interpolates a
+secret publishes it, in a repo that is currently public. This tightens the deferred *Secrets*
+gap from "wanted" to "load-bearing before the first secret-adjacent template exists". The
+`detect-private-key` prek hook covers the cache tree too, which is a real reason its scope
+must not be limited to `files/`.
+
+## Directories: do not template them
+
+The tempting question is how to put many `.tmpl` files inside `nvim/` and have each render
+land in the right place. The answer is **don't**, and the reason is measured, not
+aesthetic.
+
+A directory is either linked whole or expanded, and the two are mutually exclusive:
+
+- **linked whole** — one link; app-written files (`lazy-lock.json`, `lazyvim.json`) land in
+  the repo for free; **templating a file inside is impossible**
+- **expanded** — per-file links, so templates work; **app-written files are silently
+  dropped**, which is the constitution's forbidden edge-case
+
+The artifact model does **not** rescue expansion — a file the app invents is still a new
+real file in the target directory with no entry and no link. So the earlier decision stands:
+**app-managed directories are linked whole.**
+
+Machine variation inside such a directory goes to the **app's own include mechanism**, one
+level out of the linked tree — see the next section. For nvim specifically the corpus says
+this is not even a real need: the `keymaps.lua` divergence between `arch-wsl` and `windows10`
+turned out to be a **refactor**, not divergence, and the only platform-flavoured token
+(`<D-w>`) is inert elsewhere.
+
+> **The escape, if rung 2 ever fails.** Make the cache entry for a directory a *built tree*:
+> render the `.tmpl` files, materialise the rest, link the target at the cache directory.
+> App-written files then land in the tracked cache. It is coherent, and it is a lot of
+> machinery. **Trigger to build it:** an app that both (a) rewrites its own config directory
+> and (b) has no include mechanism, and (c) genuinely diverges between machines. Nothing in
+> the corpus meets all three.
+
+## Include vs. template: the decision rule
+
+**Prefer the app's include. Template only when the format has no include.** This is
+*prefer a link over a rendered copy* restated at file level, and it composes: an included
+file is an ordinary linked file, so it round-trips for free and needs no merge, no base and
+no reconciliation.
+
+| app | include mechanism | verdict |
+| --- | --- | --- |
+| git | `[include] path = …` | include |
+| ssh | `Include …` | include |
+| nvim / wezterm | `require`, `runtimepath`, `dofile` | include |
+| tmux | `source-file` | include |
+| zsh / bash | `source` | include |
+| alacritty | `import` | include |
+| VS Code `settings.json` | **none** — one flat JSON | template |
+| most `.ini` / `.conf` with no include directive | none | template |
+
+Isolate the varying part into a whole file, deploy that file **outside** the linked tree,
+and have the app pull it in. A machine that needs nothing gets an absent file, so the
+include must tolerate that (`pcall(dofile, …)`, git's `include.path` on a missing file, an
+`[ -r … ] && source`).
+
+### They must be mutually exclusive
+
+> **A file is either linked-and-includes, or templated. Never both.**
+
+Not style. Two mechanisms for one variation have no precedence rule, and worse, they break
+branch classification (Phase 5): the render diff sees only the part of the divergence that
+went through the template, so it will confidently classify an edit as generic while the
+machine-specific half sits in an included file it never looked at. A wrong answer delivered
+confidently is worse than no answer.
+
+## Two packages, two targets, two variable sets — why it cannot work, and what to use
+
+The natural-looking shape is:
+
+```toml
+[nvim.files]
+"nvim/init.lua.tmpl" = { target = "~/.config/nvim/init.lua" }
+[nvim.variables]
+preferred_lsp = "nvim-lspconfig"
+
+[windows.files]
+"nvim/init.lua.tmpl" = { target = "~/scoop/nvim/init.lua" }   # same source, other package
+[windows.variables]
+preferred_lsp = "native"
+```
+
+**It produces two hard errors, both verified in `merge_configuration_files`:**
+
+- same source key in two enabled packages → `file {:?} already encountered` (`config.rs:363`)
+- same scalar variable in two enabled packages → `variable "X" already encountered`
+  (`config.rs:355`)
+
+It "works" only if the two packages are never enabled together — which is the
+mutually-exclusive-package loophole already documented as a **trap** under *Package
+hygiene*: legal today, a hard error the day one machine wants both.
+
+**The mechanism you want already exists, and it is the machine file.** Machine `[files]` and
+`[variables]` apply **last** (`config.rs:409`), override everything, and **cannot collide**
+with anything:
+
+```toml
+# global.toml — one package, one entry, one default
+[nvim.files]
+"nvim/init.lua.tmpl" = "~/.config/nvim/init.lua"
+[nvim.variables]
+preferred_lsp = "nvim-lspconfig"
+
+# machines/win-work.toml — the entire divergence, in one diff
+[files]
+"nvim/init.lua.tmpl" = "~/scoop/nvim/init.lua"
+[variables]
+preferred_lsp = "native"
+```
+
+This is the division of labour the whole model rests on: **packages answer "does this apply
+to this machine?"; machines answer "and where, with what values, here?"** The intuition that
+"what varies the render lives in packages" is half right — packages carry the *defaults*;
+the machine carries the *deviation*, and it must, because that is what makes every
+divergence for a machine visible in one diff.
+
+The genuinely unserved case is **one machine rendering one template two ways to two places**.
+That is multi-target with per-target variables, and it stays **dropped** — verbatim: *"I'm
+not gonna link the same files in multiple places on the same machine. Just in different
+places on different machines."*
+
+## Git is a required dependency
+
+Not a policy preference — with the cache tracked and `git show HEAD:…` as the merge base,
+**git is structurally load-bearing**. It is also already assumed everywhere else: `bootstrap/`
+installs it, the merge driver and `rerere` are git features, and `prek` is a git-hook runner.
+
+So state it plainly: this fork requires the dotfiles repo to be a git repository. `doctor`
+fails, not warns, when it is not. Shelling out to real git (`std::process::Command`), never
+libgit2 — already decided under *Git setup*.
+
+**Do not upstream this.** Upstream dotter deliberately has no git dependency and works on a
+plain directory; requiring one would be rejected on sight, and correctly.
+
 
 ## The new part: branch classification
 

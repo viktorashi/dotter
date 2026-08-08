@@ -378,37 +378,68 @@ trigger for `-C` once this lands.
 
 ---
 
-## Phase 3c — the rendered artifact becomes tracked and linked  → fork-only
+## Phase 3c — one abstraction: everything deployed is a link  → fork-only
 
 **Gated on Phase 0a finding that templates are needed at all.** The measurement says ~11
-genuinely OS-specific lines in the whole corpus; if reconciliation removes all of them, this
-phase is unnecessary and must not be built. Design: `docs/DESIGN.md` → *The rendered
-artifact: tracked, and linked like everything else*.
+genuinely OS-specific lines in the whole corpus; if reconciliation removes them, most of
+this phase is unnecessary. Design: `docs/DESIGN.md` → *One abstraction: everything deployed
+is a link* and *The cache is the artifact, and git is the merge base*.
 
-**Blocked on Phase 1.** On Windows without Developer Mode a symlink fails and the template
+**Blocked on Phase 1.** On Windows without Developer Mode a symlink fails and a template
 falls back to a copy — the exact problem this phase removes. Do not ship before
 `up/windows-link-fallback`.
 
-`[ ]` Render to `.dotter/rendered/<machine>/<source>` (tracked) in addition to
-`.dotter/cache/<machine>/<source>` (gitignored, the merge base). Machine-key both — the
-path is `cache_directory.join(source)` (`deploy.rs:304`) and two machines sharing a repo
-would otherwise fight over one file on every pull. `machine` is known from Phase 3.
+`[ ]` Track `.dotter/cache/` in the dotfiles repo and link the target at the cache entry
+instead of `copy_file` (`actions.rs:597`). **There is no `.dotter/rendered/`** — the earlier
+two-directory design is retracted; the merge base is `git show HEAD:.dotter/cache/…`.
 
-`[ ]` Symlink the target at the artifact instead of `copy_file` (`actions.rs:597`).
-Templates then join the symlink deploy path.
+`[ ]` Guard before writing a render: `git diff --quiet` on the cache entry. Clean → write.
+Dirty → an unabsorbed live edit exists, so merge instead of overwriting. Untracked → first
+deploy, write.
 
-`[ ]` **Move the content comparison from cache↔target to cache↔artifact.** Required, not
+`[ ]` **Move the content comparison from cache↔target to git-HEAD↔worktree.** Required, not
 cosmetic: `get_file_state` (`filesystem.rs:695`) calls `read_link` first, so a symlinked
 target returns `FileState::SymbolicLink` and `compare_template` (`filesystem.rs:782`) falls
 through to `_ => TargetNotRegularFile`. **A symlinked template target is an error state
 today.** The target's own check becomes `compare_symlink`.
 
-`[ ]` Note in the docs that the cache stops being disposable — a target links into
-`rendered/`, so deleting that tree dangles every templated destination. Fork-only semantics;
-**do not attempt to upstream this.**
+`[ ]` Machine-key the cache path (`cache_directory.join(source)`, `deploy.rs:304`) —
+mandatory, or two machines conflict on every pull. Needs a `cache.toml` version bump and a
+migration that moves the tree; the `AGENTS.md` rule is not optional.
 
-`[ ]` Add `rendered_root` alongside `files_root` / `scripts_root` in `<repo>/dotter.toml`
-(Phase 3b), and the corresponding `doctor` assertion.
+`[ ]` `.tmpl` as the explicit template discriminant, stripped on deploy. Collapses
+`FileTarget::{Symbolic, ComplexTemplate}` to one struct — but **only the `type` discriminant
+dies**: `owner`, `if`, `recurse`, `append`, `prepend` all survive.
+
+`[ ]` Copy survives as a **loud fallback, never a choice** — cross-volume Windows hard links
+are impossible, and root-owned system files must not resolve into a user-writable `$HOME`.
+Deploy reports it; `doctor` lists every breadcrumb-less copied path.
+
+`[ ]` Note in the docs that the cache stops being disposable and that **renders become
+public** — this tightens the deferred *Secrets* gap. Ensure `detect-private-key` scope
+covers the cache tree, not just `files/`.
+
+`[ ]` Fork-only. **Do not attempt to upstream any of this.**
+
+---
+
+## Phase 3c-recon — verify before writing the copy-fallback rule
+
+`[ ]` Does sudo/sshd actually reject a symlinked config that resolves to a user-writable
+file? Currently **asserted, not verified** in `docs/DESIGN.md`. Run it before the claim is
+written up as fact.
+
+---
+
+## Phase 3c-b — `up/template-detection`  → upstreamable, small
+
+`[ ]` `filesystem::is_template` (`filesystem.rs:821`) reports **any** UTF-8 file containing
+`{{` as a template. In a dotfiles repo that silently captures Vue/Angular components, Jinja
+and mustache files, LaTeX macros — and this project's own `prek.toml` and hook templates.
+
+`[ ]` Additive fix, no breakage: keep the heuristic, add `.tmpl` as an explicit override,
+**warn** when the heuristic fires on a file not named `.tmpl`. One concern, real bug,
+obviously correct — the same-day-merge bucket.
 
 ---
 
