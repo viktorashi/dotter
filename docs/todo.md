@@ -146,8 +146,11 @@ target passes.
 file survives; a normal template + symlink deploy/redeploy/undeploy is unaffected;
 `cargo test`, `cargo clippy --all-targets` and `cargo fmt --check` clean.
 
+`[x]` Filed upstream by the user as **[#218 "[BUG] Refuse to deploy a template onto its own
+source"](https://github.com/SuperCuber/dotter/issues/218)**, 2026-08-08.
+
 Branch `up/self-overwrite-guard` cut from `origin/master`, pushed to the fork. **DONE, PR
-not yet opened.**
+not yet opened** — the PR body must say `Closes #218`.
 
 Small, obviously correct, data-loss class — the bucket this maintainer merges same-day. Cut
 from `origin/master`, independent of every other branch.
@@ -258,12 +261,20 @@ drafted, need the picker to exist. **Fork-only, permanently.**
 Upstream allows the override (`config.rs:408-410`) — this fork does not. Rationale:
 `docs/DESIGN.md` → *A machine declares packages, never files*. **Fork-only.**
 
+`[ ]` **File the feature request upstream first, then answer it.** An unrequested feature is
+a much harder sell than one that closes an existing issue, and this maintainer answers
+issues quickly and politely while open PRs rot. File "machines as a first-class concept"
+as an *issue* describing the problem (branch-per-machine drift, the untracked hand-edited
+`local.toml` that #100's reporter already objected to), let him state his objections, and
+only then open `up/machine-field` against it. Same play that worked for #218.
+
 `[ ]` **Per-machine target-collision check.** For every `.dotter/machines/*.toml`, resolve
 the package set including the `depends` closure, flatten, and report targets that collide.
 The machine named in `local.toml` → hard error; every other machine → warn. Exclude
-`target = ""` (the disable form). Compare by **containment**, not equality, so a
-whole-directory link and a separate entry for a file inside it is caught — that is the
-Phase 0c data-loss combination. **Fork-only** (upstream has no machine files to iterate).
+`target = ""` (the disable form). Containment counts as a collision **only when the outer
+entry is a single whole-directory link** (`recurse = false`) — that is the Phase 0c
+data-loss combination. Under `recurse = true` an inner entry is legitimate and must not be
+flagged. **Fork-only** (upstream has no machine files to iterate).
 
 `[ ]` Fix the Phase 0a `reconcile` branch of the dotfiles repo: the four
 `.dotter/machines/*.toml` currently carry `[files]` blocks overriding
