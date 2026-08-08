@@ -10,7 +10,7 @@ unchanged.
 **Companion files** — read all three before starting work:
 
 | file | contents |
-|---|---|
+| --- | --- |
 | `AGENTS.md` | project vision, working rules, the upstream maintainer's behaviour |
 | `docs/todo.md` | the ordered, gated work items |
 | this file | why each decision was made, and what was rejected |
@@ -79,6 +79,8 @@ rectangle "after" {
    deployed file, the repo file changed, because they are the same file. A rendered template
    does not round-trip, and that is where every hard problem in this project comes from.
 
+- try keeping changes backwards compat, and actually being able to statically verify if our changes are backwardly compatible with absoltely any possible valid configution. Idk what tools can be used for that.
+
 ### The repo, after the port
 
 ```plantuml
@@ -110,7 +112,7 @@ Almost all of it is **config, not code**. The tool changes are small, and each o
 because a specific thing was measured to be broken:
 
 | what | why it exists |
-|---|---|
+| --- | --- |
 | **Phase 0a** port the dotfiles | the actual goal. Reconcile the 98% drift *first*, as its own commit, before any dotter config exists |
 | **0b** `up/watch-filter` | `dotter watch` infinitely re-deploys; root-caused to globs passed as `filters` instead of `ignores` |
 | **0c** `up/self-overwrite-guard` | verified **data loss**: a template inside a whole-directory symlink resolves back onto its own source, and `--force` deletes it |
@@ -222,7 +224,7 @@ the moment a target path is a config value.
 ### Branch topology
 
 | branch | files | ahead of `main` | behind `main` | last commit |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `main` | 51 | — | — | — |
 | `arch-wsl` | 94 | 372 | 18 | 2026-07-29 |
 | `leanoox` | 94 | 372 | 18 | 2026-07-29 |
@@ -243,7 +245,7 @@ by whether it mentions anything OS-shaped (`windows|wsl|darwin|brew|pacman|apt|s
 AppData|USERPROFILE|.exe|/mnt/c|uname|msys|cygwin`):
 
 | | lines |
-|---|---|
+| --- | --- |
 | changed between the two branches | **1478** |
 | of those, OS-flavoured | **29 (2.0%)** |
 | of those 29, inside `docs/README.md` | 17 |
@@ -635,7 +637,6 @@ libgit2 — already decided under *Git setup*.
 **Do not upstream this.** Upstream dotter deliberately has no git dependency and works on a
 plain directory; requiring one would be rejected on sight, and correctly.
 
-
 ## The new part: branch classification
 
 Getting a merged *output* back into a `.hbs` requires inverting the render. Handlebars is
@@ -783,7 +784,7 @@ does.
 One mechanism answers all three questions:
 
 | question | answered by |
-|---|---|
+| --- | --- |
 | **Which files exist on this machine?** | packages selected in the machine file |
 | **Where does this file go here?** | `[files]` override, or a variable in the target (PR #190) |
 | **What is in it?** | variables, app-native `include` directives, templating as last resort |
@@ -824,7 +825,7 @@ layer; desktop additionally deploys `gaming`; laptop does not.
 Drift needs no new mechanism:
 
 | drift | how |
-|---|---|
+| --- | --- |
 | desktop gains a file laptop must not have | add a package, enable it in `desktop.toml` |
 | several machines share a change | put it in a layer they all include |
 | WSL needs interop files native Arch must not | a `wsl.toml` layer, included only by the WSL machine |
@@ -1058,7 +1059,7 @@ recipe).
 Reading them, most are not a third category at all:
 
 | current file | what it actually is | destination |
-|---|---|---|
+| --- | --- | --- |
 | `restore-nvim-session.sh` | one line, `exec nvim "+lua …"` | a shell alias — delete the file |
 | `tmux-config.sh` | one line, `tmux source-file …` | a shell alias — delete the file |
 | `generate-readme.sh` | one `pandoc` line | **already duplicated** as the `generate-readme` recipe in `docs/Makefile` |
@@ -1105,7 +1106,7 @@ The word "variable" is doing three different jobs, and conflating them is what m
 feel unsolvable. Separate them and the confusion goes away.
 
 | kind | supplied by | available | example |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **authored** | you, in a machine or package file | always | `config_dir`, `theme = "dark"` |
 | **built-in** | dotter | before rendering | `dotter.windows`, `dotter.hostname` |
 | **environment** | the process environment | before rendering | `$APPDATA` |
@@ -1259,7 +1260,7 @@ rather than beside its source. But that is a **transposition**, not a loss — t
 facts, indexed differently:
 
 | indexed by | easy to answer | hard to answer |
-|---|---|---|
+| --- | --- | --- |
 | **source** (multi-target array) | "where does `nvim` go everywhere?" | "what is different about `win-work`?" |
 | **machine** (composition) | "what is different about `win-work`?" | "where does `nvim` go everywhere?" |
 
@@ -1295,7 +1296,7 @@ additive — every config that parses today still parses. Adding it in six month
 exactly what it costs now. Measured overlap with the planned branches:
 
 | branch | files | collides with multi-target? |
-|---|---|---|
+| --- | --- | --- |
 | `up/config-tests` | `tests/` | no |
 | `up/windows-link-fallback` | `filesystem.rs`, `deploy.rs:67-84` | **yes** — same file-classification loop in `deploy.rs` |
 | `up/self-overwrite-guard` | `actions.rs` | no |
@@ -1366,7 +1367,7 @@ Both are **privilege-free** on Windows, and a hard link shares an inode, so roun
 preserved exactly as with a symlink:
 
 | source kind | mechanism | privilege |
-|---|---|---|
+| --- | --- | --- |
 | file | `CreateHardLink` | none |
 | directory | NTFS junction | none |
 
@@ -1614,7 +1615,7 @@ Answers "on a brand-new machine, which config am I?" without hand-editing anythi
   (create a new machine)
 ```
 
-5. **Write one generated line** to gitignored `.dotter/local.toml`:
+1. **Write one generated line** to gitignored `.dotter/local.toml`:
 
 ```toml
 machine = "desktop"
@@ -1691,7 +1692,7 @@ things go *out*; the capture already happened via the symlink. Push is too late 
 history would already contain a commit that claims a truth it does not have. Commit is
 where the repo asserts "this is what this machine is".
 
-#### Is a hook runner justified for one hook? On its own, no.
+#### Is a hook runner justified for one hook? On its own, no
 
 The lazy answer is native git: `git config core.hooksPath .githooks` plus one tracked
 `.githooks/pre-commit`. Zero dependencies, and `dotter setup-git` already exists to set it.
@@ -1705,7 +1706,7 @@ weakest reason to adopt it. It is justified by repo-integrity checks this corpus
 hooks: offline, no Python, no network, no per-hook environment to build.
 
 | builtin hook | the problem it catches, measured in this repo |
-|---|---|
+| --- | --- |
 | `destroyed-symlinks` | **the decisive one.** `arch-wsl` tracks a real symlink (mode `120000`, `.config/systemd/user/default.target.wants/agents-render.path`). Checked out by a git that cannot make symlinks — which is the default on Windows — it becomes a text file containing the path, and committing that **silently destroys it**. For a repo whose entire purpose is symlinks, used on Windows, this is a live hazard |
 | `check-symlinks` | catches a committed symlink that dangles |
 | `detect-private-key` | the repo is **public** and the *Secrets* gap below is still open |
@@ -1763,7 +1764,7 @@ Everything below was executed, not reasoned about. Date: 2026-08. Binary: dotter
 ### Confirmed
 
 | claim | result |
-|---|---|
+| --- | --- |
 | **A hard link is not recognised as dotter's own link** | **Confirmed.** Deployed a symlink, replaced the target with a hard link to the same source (verified same inode `4132`), redeployed → `[ERROR] Updating symlink ... but target already exists and isn't a symlink. Skipping.` Phase 1's central finding is real. |
 | **PR #190 merges cleanly onto current `origin/master`** | **Confirmed.** `git merge-tree` reports no conflicts; built and ran it. |
 | **PR #190 does what the plan needs** | **Confirmed.** One `config_dir` variable in a machine file retargeted *both* managed files. |
@@ -1783,7 +1784,7 @@ the co-location*.
 Precedence, measured:
 
 | form | resolves to |
-|---|---|
+| --- | --- |
 | `${defined}` where `defined` is a config variable | the config variable |
 | `${SHADOWED}` defined **both** as config variable and env var | **config wins** |
 | `${MY_ENV_VAR}` not a config variable | the environment |
@@ -1854,7 +1855,7 @@ has its own Rust toolchain (cargo 1.97.1), so probes and dotter itself were buil
 **Link capability, measured:**
 
 | operation | result |
-|---|---|
+| --- | --- |
 | `New-Item -ItemType SymbolicLink` (file) | **FAIL** — "Administrator privilege required for this operation." |
 | `New-Item -ItemType SymbolicLink` (directory) | **FAIL** — same |
 | `New-Item -ItemType HardLink` | **OK** |
@@ -1937,6 +1938,7 @@ and the results did not stabilise before the session ended. Treat the filter bug
 and the end-to-end fix as **open**.
 
 > **Test methodology warnings — all three of these produced false conclusions here:**
+>
 > 1. The **deploy target must be outside the watched tree.** Deploying into `./home` makes
 >    every deploy retrigger the watcher. This is inherent, not a bug.
 > 2. The **log file must be outside the watched tree.** Redirecting `watch -v` output into
@@ -1968,7 +1970,7 @@ Docker, 2026-08. Dispatch order `pacman → apt-get → dnf → zypper → apk` 
 on every image tested:
 
 | image | branch taken |
-|---|---|
+| --- | --- |
 | `archlinux:base` | `pacman` |
 | `debian:stable-slim` | `apt-get` |
 | `fedora:latest` | `dnf` |
@@ -2000,7 +2002,7 @@ rotz's 13, 2 are. Sizes and touched files are measured, not estimated.
 ### Take
 
 | what | source | size | why |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Watch debounce** | `Juemuren/dotter` — *"Add debounce to prevent infinite loops when watch"* | **+21/-3**, `src/watch.rs` | Closes open issue **#196** (watch + post-deploy hook infinitely recurses). Not our code, near-zero risk. Doubles as the probe PR that measures the maintainer's response time. |
 | **Variables in target paths** | upstream PR **#190** (`balthild:master`), open since 2024-11-06, zero reviews | **+106/-13**, `src/config.rs` | Closes #61. Collapses N per-file destination overrides into one variable per machine — recovers most of the co-location the multi-target array was going to provide. Cherry-pick into the fork; do **not** re-open it upstream, that duplicates a PR already rotting. |
 | **Recursing for template targets** | `faffeldt/dotter` — *"Allow recursing for template target"* | **+43/-0**, `src/config.rs` | Templated directories currently cannot recurse the way symlinked ones do. Only matters if Phase 0a finds a non-zero residual templated set. |
@@ -2008,7 +2010,7 @@ rotz's 13, 2 are. Sizes and touched files are measured, not estimated.
 ### Watch, do not take yet
 
 | what | source | size | note |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `copy` deployment type with checksum caching | PR **#214** (JP-Ellis), 2026-04 | +1205/-10, 7 files | Overlaps the Windows-linking work: both concern what to do when a symlink is impossible. Hard links are the better answer (round-trip preserved), but the checksum-cache machinery here may be reusable. Read before writing Phase 1. |
 | Elevate permissions on directory access | PR **#215** (archnode), 2026-05 | +822/-86, 5 files | Relevant to `/etc` targets with `owner = "root"`. Large; wait and see if it lands upstream. |
 | Recursive off by default for symbolic folders | PR **#206** (Faria22), 2025-12 | +59/-2, `src/config.rs` | Behaviour change — would alter deploy semantics under us. Track it. |
@@ -2142,7 +2144,7 @@ The dispatcher is POSIX `sh`, and dotter prefers a `.bat` sibling on Windows
 (`hooks.rs:16-27`), so `post_deploy.bat` must invoke `sh` somehow. Measured on this box:
 
 | probe | result |
-|---|---|
+| --- | --- |
 | `Get-Command sh` | **not found** — Git for Windows is installed but only `Git\cmd\` is on `PATH` |
 | `Get-Command bash` | `C:\WINDOWS\system32\bash.exe` — **the WSL launcher, not Git Bash** |
 | `$env:LOCALAPPDATA\Programs\Git\bin\sh.exe` | exists, runs, `HOME=/c/Users/istan`, `uname -s` = `MINGW64_NT-10.0-26100` |
@@ -2200,7 +2202,7 @@ since been answered, so the rejection is withdrawn. Recording why, because the r
 correct about the thing it was actually looking at:
 
 | original objection | what answers it |
-|---|---|
+| --- | --- |
 | *"it would carry exactly one key"* | it carries the settings layer dotter has never had — merge tool, layout roots, behaviour flags. The one-key version deserved rejecting; this is not that |
 | *"it is the one file dotter could never deploy to itself"* | only if it is **required**. With a `--clone <url>` bootstrap path, nothing needs it to exist first: it is an optimisation, not a prerequisite — so it can be deployed from `files/dotter/dotter.toml` like anything else |
 
@@ -2218,7 +2220,7 @@ The proposal originally had one file in two places with a templated/non-template
 Giving each location a distinct job removes that branch entirely:
 
 | file | job | tracked? | templated? |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `<repo>/dotter.toml` | settings **for this repo** — layout roots, merge tool | yes, in the repo | **never** |
 | `~/.config/dotter/dotter.toml` | **where the repo is**, plus per-machine behaviour | no — it is *deployed* | may be, from `files/dotter/dotter.toml` |
 
@@ -2343,7 +2345,7 @@ is the smaller thing. Record instances here; the first non-shell caller justifie
 with the release binary against a scratch `HOME`:
 
 | | default (`recurse` on) | `recurse = false` |
-|---|---|---|
+| --- | --- | --- |
 | what is created | one symlink **per file** | **one** symlink for the whole directory |
 | template a file inside | **works** — a more specific entry wins cleanly, source untouched | **impossible**, see below |
 | app writes a *new* file into the target | **silently invisible** — `lazy-lock.json` created in the target never appeared in the repo | **lands in the repo automatically** — appeared as `files/nvim/lazy-lock.json` |
