@@ -32,6 +32,23 @@ Headline results, so this phase is actionable without re-measuring:
   `security-crypto/*.ps1`, `.bash_profile` on Windows; `.config/systemd/user/` and
   `/etc/mc/mc.vim.keymap` on Linux).
 
+The trial merges have since been run — see `docs/DESIGN.md` → *Phase 0a, measured: what
+actually conflicts*. Three results change how this phase is executed:
+
+- There are **four distinct states, not five**: `arch-wsl` and `leanoox` are the same
+  commit (`ef2c5e7`).
+- **All machine-specific content lives in four shell startup files** (`.profile`,
+  `.zprofile`, `.zshrc`, `docs/shared.sh`) plus one line of `.gnupg/gpg-agent.conf` and one
+  `brew install` line. All four have `source`, so they take an **include, not a template**.
+  Reconcile those four by hand first; everything else is drift or app-written churn.
+- `.codex/config.toml` is the one file that cannot be split — authored settings and
+  app-appended `[projects."…"]` tables in one file with no include directive. Do not try to
+  reconcile it line by line; it is the mergiraf case (Phase 4).
+
+Scratch clone is at `/tmp/opencode/dotfiles` with `pre-port/*` tags already created
+(**local only — push them before relying on them**). Full conflict text:
+`/tmp/opencode/conflicts.md`.
+
 `[ ]` Design the target tree **from the dotter model, not from the current repo layout.**
 The existing structure is shaped by the `$HOME`-mirror constraint, which this fork removes.
 Where the current tree only looks the way it does because a destination could not be
