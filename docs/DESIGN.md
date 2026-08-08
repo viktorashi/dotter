@@ -298,6 +298,87 @@ four weeks older, so it simply never received them.
 - **Phase 5 has a ready-made test set**: the 1478/29 split is ground truth. A classifier
   run over these branches should recover ≈29 candidate lines, not 1478.
 
+## Phase 0a, measured: what actually conflicts
+
+The earlier measurement counted *changed lines*. This one runs the real merges, because
+git's 3-way merge already implements "only one side changed → take that side" — so whatever
+conflicts is, by definition, the part that needs a human.
+
+**Topology (verified).** `arch-wsl` and `leanoox` are the *same commit* (`ef2c5e7`) — four
+distinct states, not five. No branch is an ancestor of any other; `main` is a fifth diverged
+state, 18/22/19 commits ahead of each machine branch while 372/198/156 behind. Pairwise
+merge bases are all Nov 2025, so the tree has been diverging for ~9 months.
+
+**Path census across the four states — 137 distinct paths:**
+
+| count | class |
+| --- | --- |
+| 40 | differ between branches |
+| 39 | exist on exactly one branch (27 arch-wsl, 19 windows10, 11 mac, 1 main) |
+| 23 | identical wherever present |
+| 16 | identical everywhere |
+
+**Real conflicts, by merging `arch-wsl` with each other branch:** 20 files vs `mac`, 11 vs
+`windows10`, 3 vs `main`. Note that many are **add/add** (`AA`) — the same file written
+independently on two branches with no common ancestor, which is why single-hunk entries can
+run to hundreds of lines (`.codex/config.toml` 272, `.config/tmux/tmux.conf` 176).
+
+### The finding that matters: divergence is confined to the shell startup files
+
+Scanning every conflict region for OS-flavoured tokens, the genuinely machine-specific
+content is **almost entirely in four files**:
+
+| file | machine-specific content |
+| --- | --- |
+| `.profile` | 4 WSL→Windows `PATH` entries (`/mnt/c/…/Git/bin`, `scoop/shims`, Integrity client) |
+| `.zprofile` | `eval "$(/opt/homebrew/bin/brew shellenv)"`, pipx `PATH` — mac |
+| `.zshrc` | linuxbrew shellenv, `/opt/nvim-linux-x86_64/bin`, `/msys64/usr/bin`, `Library/pnpm`, several `/Users/viktorashi/…` paths |
+| `docs/shared.sh` | a handful of `PATH` entries and aliases (`powershell.exe`, `/c/Users/istan/Envs/…`) |
+
+Everything else reduces to **one line in `.gnupg/gpg-agent.conf`**
+(`pinentry-program /opt/homebrew/bin/pinentry-mac`) and **one `brew install` line** in
+`install-init-stuff.sh`. The remaining regex hits are false positives — tmux's
+`renumber-windows on`, a `target_window` in prose, an `.ssh/config` comment.
+
+**This confirms the ~11-line estimate and decides Phase 3c.** Shell startup files have a
+native include mechanism — `source` — so by the *include vs. template* rule they take an
+include, not a template. **The corpus may require zero templates**, which is the condition
+Phase 3c was explicitly gated on.
+
+### The genuinely hard case: files that mix authored config with app-written state
+
+`.codex/config.toml` is the one file the include rule does not rescue, and it deserves a
+name because it will recur.
+
+```
+arch-wsl:  90 lines, 20 [projects."…"] blocks
+mac:      181 lines, 18 [projects."…"] blocks
+```
+
+The head of the file is authored — `model`, `model_reasoning_effort`, `personality`,
+`[tui] status_line`, `[plugins…]`. The rest is written by the app: one
+`[projects."/absolute/path"] trust_level = …` table per directory the tool has ever been
+opened in, plus `[notice]`, `[notice.model_migrations]`, `[tui.model_availability_nux]`.
+
+Those project tables are **per-machine by construction** — they are absolute paths on that
+machine — and they are **append-only**. That combination is why this file produced the
+single largest conflict in the corpus, and it cannot be split, because the format has no
+include directive.
+
+**This is the concrete justification for mergiraf**, which until now was argued generically.
+Two machines each appending a different TOML table to the same file is a textbook
+syntax-aware merge: line-based git sees overlapping insertions at the same anchor and
+conflicts; a TOML-aware merge sees two independent table additions and takes both.
+
+### Also confirmed: app-written files are the churn, everywhere
+
+`.config/nvim/lazy-lock.json` (14 hunks), `.config/nvim/lazyvim.json`,
+`.agents/.skill-lock.json` and `.config/nvim/lua/plugins/mason.lua` — the `ls`-generated
+roster — are all conflicts produced by *tools*, not by the user. Combined with
+`.codex/config.toml` they are the majority of the conflict mass. Every one of them is the
+"apps rewrite their own configs" case from the vision statement, and every one of them
+argues for linking whole rather than rendering.
+
 ## Prior art: nobody shipped this
 
 Fork audit (GitHub API, 2026-08):
