@@ -8,6 +8,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` dro
 
 ---
 
+Make it as issue-oriented as possible. No matter which PR you file, make it mention as if it closes a certain issue. If there's not an issue for it already, make one, for feature request or something, then solve it yourself lol.
+
 ## Phase 0a — port the dotfiles using only what ships today
 
 **Input**: `github.com/viktorashi/dotfiles`, five branches. **Already measured** — the
@@ -35,12 +37,12 @@ The existing structure is shaped by the `$HOME`-mirror constraint, which this fo
 Where the current tree only looks the way it does because a destination could not be
 expressed, do not carry the shape over. Specifically:
 
-  - `docs/startup-scripts/link-nvim.{ps1,bat}` — 90 lines of PowerShell + a `.bat` twin,
+- `docs/startup-scripts/link-nvim.{ps1,bat}` — 90 lines of PowerShell + a `.bat` twin,
     junctioning one directory, demanding admin it does not need. **Delete both**; Phase 1
     plus a machine file replaces them.
-  - `docs/linkables/link_them.sh` — one `sudo ln -s` into `/etc`. **Delete**; dotter has
+- `docs/linkables/link_them.sh` — one `sudo ln -s` into `/etc`. **Delete**; dotter has
     `owner = "root"`.
-  - `docs/` currently mixes real config, one-shot setup scripts and dead `legacy-shi/`.
+- `docs/` currently mixes real config, one-shot setup scripts and dead `legacy-shi/`.
     Split deliberately; do not port it as one blob.
 
 `[ ]` Reconcile the drift **first, as its own commit, before any dotter config exists.**
@@ -75,15 +77,15 @@ deploy.
 deploy. Rules and the per-file verdicts are in `docs/DESIGN.md` → *The third category:
 things you run yourself*. Concretely:
 
-  - `restore-nvim-session.sh`, `tmux-config.sh` — one line each. **Delete**, make them shell
+- `restore-nvim-session.sh`, `tmux-config.sh` — one line each. **Delete**, make them shell
     aliases.
-  - `no-exe-wrapper-scripts.sh` — generates two static 2-line wrappers. **Delete**; commit
+- `no-exe-wrapper-scripts.sh` — generates two static 2-line wrappers. **Delete**; commit
     `files/bin/wt` and `files/bin/im` instead.
-  - `generate-readme.sh` **and** `docs/Makefile` — the same `pandoc` line, twice. Both go;
+- `generate-readme.sh` **and** `docs/Makefile` — the same `pandoc` line, twice. Both go;
     one `just generate-readme` recipe replaces them. That is the **only** recipe left.
-  - `backup-remove-and-clone.sh` — **delete**. It is the current bootstrap and every line is
+- `backup-remove-and-clone.sh` — **delete**. It is the current bootstrap and every line is
     replaced (see `docs/DESIGN.md` → *Gaps*).
-  - `startup-scripts/configupdatemason.sh` — **delete**. It snapshots `ls
+- `startup-scripts/configupdatemason.sh` — **delete**. It snapshots `ls
     ~/.local/share/nvim/mason/packages`, which is the cause of the drift, not a fix for it.
     Declare one shared roster as a plain file instead.
 
@@ -195,10 +197,10 @@ the traced changed-file set.
 runs still looped, and three test-methodology flaws were found mid-investigation. Required
 before submitting:
 
-  - deploy target **outside** the watched tree
-  - `watch` log **outside** the watched tree
-  - identical results at `-v` and `-vvv` (they differed; investigate why)
-  - acceptance: **0 deploys** with no change, **exactly 1** per real source edit
+- deploy target **outside** the watched tree
+- `watch` log **outside** the watched tree
+- identical results at `-v` and `-vvv` (they differed; investigate why)
+- acceptance: **0 deploys** with no change, **exactly 1** per real source edit
 
 `[ ]` Add a duplicate-**target** assertion to the corpus. Verified footgun: two packages
 with different sources and the same target is *not* a config error — it fails at deploy
@@ -255,8 +257,8 @@ instead of a symlink, and stop routing directories into `desired_templates` when
 4390 ("not a reparse point"), so `get_file_state` returns `File(..)` and `compare_symlink`
 falls to `TargetNotSymlink`.
 
-  - `[ ]` Add a same-file check to `get_file_state` / `compare_symlink`
-  - `[ ]` **Use the `same-file` crate.** Verified that
+- `[ ]` Add a same-file check to `get_file_state` / `compare_symlink`
+- `[ ]` **Use the `same-file` crate.** Verified that
     `std::os::windows::fs::MetadataExt::file_index()` / `volume_serial_number()` are
     **unstable** (`windows_by_handle`, rust-lang#63010) and do not compile on stable.
     `same-file` returned correct results for hard links, junctions and unrelated files.
@@ -290,6 +292,7 @@ creates a directory of that name.
 ```toml
 "nvim" = "${config_dir}/nvim"              # global.toml
 ```
+
 ```toml
 [variables]                                # .dotter/machines/win-work.toml
 config_dir = "${APPDATA:-/nonexistent}"
@@ -486,14 +489,14 @@ nor rerere.
 `[ ]` **`dotter doctor` layout assertions** — the thing that makes `files/` vs `scripts/`
 enforceable rather than merely conventional (`docs/DESIGN.md` → *Imperative setup*):
 
-  - every path under `files/` appears as a source key in the merged config (else it is
+- every path under `files/` appears as a source key in the merged config (else it is
     deployed nowhere and is silently dead);
-  - no path under `scripts/` appears as a source key;
-  - every `scripts/<name>/` matches a declared package (`undeploy/` is a reserved
+- no path under `scripts/` appears as a source key;
+- every `scripts/<name>/` matches a declared package (`undeploy/` is a reserved
     subdirectory name, not a package) name (else it silently never runs).
     Note a script-only package is legal — `Package.files` is `#[serde(default)]`, verified —
     so `certs` may declare zero files;
-  - **for every deployed directory, target-side files with no source entry.** Expanded
+- **for every deployed directory, target-side files with no source entry.** Expanded
     directories silently drop anything the app writes into them (`lazy-lock.json` was
     verified invisible). Same orphan-detection as the `files/` rule, pointed the other way.
     This one must **also report during `deploy`**, not only under `doctor` — the
@@ -548,6 +551,7 @@ script of every selected package on every deploy. Editing one line of `.zshrc` w
 sooner: skip the dispatcher when running under `watch`.
 
 ---
+
 ## Deferred — secrets
 
 Wanted, explicitly low priority. `.ssh/config` is the live case (internal corporate
