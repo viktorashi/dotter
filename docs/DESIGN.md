@@ -1123,6 +1123,71 @@ variation.
 **This argument has a hard dependency on symlinks actually being available — see
 "Windows linking" below, where it currently fails.**
 
+### A machine declares packages, never files
+
+Upstream dotter allows it: `local.files` is applied last, overriding everything
+(`config.rs:408-410`), and the wiki's official per-OS recipe is exactly an included file
+carrying an overriding `[pkg.files]` block. It is legal, it works, and this fork **still
+forbids it**.
+
+The reason is the vision bullet *a machine is an entity, not a set of flags*. The instant a
+machine file can also place a file, file placement is decided in two places — the package
+table and the machine table — and "where does this file go" needs both to answer. That is
+the two-index problem this whole design exists to remove.
+
+> **Rule.** `.dotter/machines/<name>.toml` may declare `packages` and `variables`. A
+> `[files]` block there is an error.
+
+Machine-exclusive files are therefore a **package named after the machine**. That reads
+honestly — "the things only this machine has" is a set of files, which is what a package is:
+
+```toml
+# .dotter/global.toml
+[arch-wsl.files]
+"files/shell/machines/arch-wsl.sh" = "~/.config/shell/machine.sh"
+
+# .dotter/machines/arch-wsl.toml
+packages = ["shell", "nvim", "git", "arch-wsl"]
+```
+
+Same shape for the one file in the corpus with no include directive,
+`.gnupg/gpg-agent.conf`: a `gnupg` package and a `gnupg-mac` package, each with its own
+source, each targeting `~/.gnupg/gpg-agent.conf`, and a machine enables exactly one.
+
+**Rejected alternative:** machine `[files]` overrides, as originally written into the
+Phase 0a `reconcile` branch. Shorter to write, and it is what upstream documents — but it
+splits the answer to "where does this go on this machine" across two tables.
+
+### The collision check that makes this safe
+
+Two packages with the *same source key* is already a hard error (`config.rs:363`). Two
+packages with **different sources and the same target** is not an error at all — it fails
+at deploy, first-writer-wins by alphabetical package order. That is the only silent
+footgun in the composition model, and the `gnupg`/`gnupg-mac` pattern above walks straight
+into it: the pair is safe only because no machine enables both.
+
+So the pattern is not safe by construction, it is safe by *assertion* — and the assertion
+must be checked:
+
+> For every machine file in `.dotter/machines/*.toml`, resolve its package set (including
+> the transitive `depends` closure), flatten, and look for two entries whose targets
+> collide.
+>
+> - the machine named in `local.toml` → **hard error**; you are about to deploy it
+> - any other machine → **warn**; it is a latent break you cannot fix from here
+
+Two things it must get right:
+
+- **`target = ""` is the disable form** and must be excluded before comparing, or every
+  legitimate disable reads as a collision.
+- **Containment, not equality.** `~/.config/nvim` deployed as a whole-directory link and
+  `~/.config/nvim/lua/keys.lua` deployed as its own entry are different targets that
+  overlap. That is precisely the combination that destroyed a source file in Phase 0c, so
+  the comparison is "is one target a prefix of the other", not "are they equal".
+
+Fork-only, and gated on Phase 3 — dotter has no concept of `.dotter/machines/` until
+`up/machine-field` lands. Not upstreamable: upstream has no machine files to iterate.
+
 ## Imperative setup: what dotter gives you, and what it does not
 
 Some machine-specific configuration is not a file in a place. Installing a corporate CA

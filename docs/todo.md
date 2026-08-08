@@ -244,6 +244,22 @@ requires `crossterm ^0.29.0`, which dotter already pins. No second terminal back
 `[ ]` Bootstrap scripts (`bootstrap/install.sh`, `install.ps1`, `router.js`) — already
 drafted, need the picker to exist. **Fork-only, permanently.**
 
+`[ ]` **Reject `[files]` in a machine file.** A machine declares `packages` and
+`variables` only; machine-exclusive files become a package named after the machine.
+Upstream allows the override (`config.rs:408-410`) — this fork does not. Rationale:
+`docs/DESIGN.md` → *A machine declares packages, never files*. **Fork-only.**
+
+`[ ]` **Per-machine target-collision check.** For every `.dotter/machines/*.toml`, resolve
+the package set including the `depends` closure, flatten, and report targets that collide.
+The machine named in `local.toml` → hard error; every other machine → warn. Exclude
+`target = ""` (the disable form). Compare by **containment**, not equality, so a
+whole-directory link and a separate entry for a file inside it is caught — that is the
+Phase 0c data-loss combination. **Fork-only** (upstream has no machine files to iterate).
+
+`[ ]` Fix the Phase 0a `reconcile` branch of the dotfiles repo: the four
+`.dotter/machines/*.toml` currently carry `[files]` blocks overriding
+`files/shell/machines/<name>.{sh,zsh}`. Convert each to a package named after the machine.
+
 ---
 
 ## Phase 3b — `dotter.toml` settings file  → upstream `up/dotter-toml`, then fork-only
