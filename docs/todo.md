@@ -410,9 +410,21 @@ today.** The target's own check becomes `compare_symlink`.
 mandatory, or two machines conflict on every pull. Needs a `cache.toml` version bump and a
 migration that moves the tree; the `AGENTS.md` rule is not optional.
 
+`[ ]` **`link = "symbolic" | "hard" | "copy"` as a second, orthogonal field** — this is
+what makes "a template that is also symlinked" expressible. `type` conflates two axes
+(*what the source is* vs *how the target attaches*), which is why the two are mutually
+exclusive today.
+
+`[ ]` **Do not repurpose `type`.** `type = "symbolic"` currently means "do not template
+this" (the maintainer's own prescribed escape hatch, #192). Reinterpreting it as a link
+kind would silently *start* templating exactly those files — the ones containing `{{` —
+mangling them instead of erroring. `type` stays deprecated-but-functional; the warning must
+name both replacements, since one old value maps to each axis.
+
 `[ ]` `.tmpl` as the explicit template discriminant, stripped on deploy. Collapses
-`FileTarget::{Symbolic, ComplexTemplate}` to one struct — but **only the `type` discriminant
-dies**: `owner`, `if`, `recurse`, `append`, `prepend` all survive.
+`FileTarget::{Symbolic, ComplexTemplate}` to one struct with every field optional — trivially
+backwards compatible under serde. `owner`, `if`, `recurse`, `append`, `prepend` all survive;
+only `type` is retired, and only once `link` and `.tmpl` both exist.
 
 `[ ]` Copy survives as a **loud fallback, never a choice** — cross-volume Windows hard links
 are impossible, and root-owned system files must not resolve into a user-writable `$HOME`.
@@ -436,15 +448,23 @@ written up as fact.
 
 ## Phase 3c-b — `up/template-detection`  → upstreamable, small
 
-`[ ]` `filesystem::is_template` (`filesystem.rs:821`) reports **any** UTF-8 file containing
-`{{` as a template. In a dotfiles repo that silently captures Vue/Angular components, Jinja
-and mustache files, LaTeX macros — and this project's own `prek.toml` and hook templates.
+**Not gated on Phase 0a.** The bug is upstream's and bites anyone whose config contains
+`{{{`; it stands even if reconciliation leaves zero templates in our corpus.
 
-`[ ]` Additive fix, no breakage: keep the heuristic, add `.tmpl` as an explicit override,
-**warn** when the heuristic fires on a file not named `.tmpl`. One concern, real bug,
-obviously correct — the same-day-merge bucket.
+`[ ]` **Do not open a new feature request.** Already filed and closed twice: **#20**
+(2020, "Some file are recognized as template when they are not" — closed by merging into
+#18, which is where `type = "symbolic"` came from) and **#192** (2025, yazi `theme.toml`
+with vim fold markers — answered *"use `type = "symbolic"`"*, working as designed).
+Re-litigating the design loses.
 
----
+`[ ]` File the **asymmetry** instead, which is unfiled and is a real bug.
+`filesystem.rs:821-838`: the non-UTF-8 branch `warn!`s *and* says how to silence it; the
+`buf.contains("{{")` branch is **silent**. A false positive therefore surfaces only as a
+handlebars parse error on a line the user never wrote — or not at all, if the file happens
+to be valid handlebars, in which case the deployed config is silently wrong.
+
+`[ ]` Fix = one symmetric `warn!` reusing his own wording, plus `.tmpl` to silence it.
+One concern, real bug, obviously correct.
 
 ## Phase 3d — reconciliation hook via `prek`  → fork-only
 
