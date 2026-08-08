@@ -10,170 +10,66 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[-]` dro
 
 Make it as issue-oriented as possible. No matter which PR you file, make it mention as if it closes a certain issue. If there's not an issue for it already, make one, for feature request or something, then solve it yourself lol.
 
-## Phase 0a — port the dotfiles using only what ships today
+## Phase 0a — port the dotfiles using only what ships today  → **DONE**
 
-**Input**: `github.com/viktorashi/dotfiles`, five branches. **Already measured** — the
-numbers, the topology and what they decide are in `docs/DESIGN.md` → *Measured: what drift
-actually looks like*. Read that section before touching anything here; it is the
-justification for the whole plan.
+Executed in a scratch clone at `/tmp/opencode/dotfiles`, branch `reconcile`, **not pushed**.
+Five commits: three merges, one restructure, two fixups. The reasoning and the measurements
+are in `docs/DESIGN.md` → *Measured: what drift actually looks like* and → *Phase 0a,
+measured: what actually conflicts*.
 
-Headline results, so this phase is actionable without re-measuring:
+`[x]` Clone, tag the five pre-port branches (`pre-port/*`, local only) as Phase 5 ground truth.
+`[x]` Reconcile all four distinct states into one tree, as its own commit, before any dotter
+      config existed. 40 conflicts total: 20 from `mac`, 14 from `windows10`, 6 from `main`.
+`[x]` Restructure to the two-root layout, write `.dotter/`, delete every workaround script.
+`[x]` Verify end to end: deploy creates 33 links under a scratch `HOME`; undeploy removes
+      all of them.
+`[x]` Collapse `read-me.md` + `justfile` into one `README.md` — the pandoc split existed
+      only to inline script bodies, and nothing is inlined any more.
 
-- Deployment today is a bare repo with `--work-tree=$HOME`, so **the repo is `$HOME`** and
-  a destination cannot be chosen. That single constraint produced every workaround in the
-  tree.
-- `main` is **not** a base — it is behind every machine branch by 156–372 commits. Do not
-  treat it as the shared layer; build the shared layer from what the machine branches
-  *agree* on.
-- `arch-wsl` and `leanoox` are **byte-identical**. Two machine files, same layers.
-- **98% of the divergence is drift** (1478 changed lines between `arch-wsl` and
-  `windows10`; 29 OS-flavoured; ~11 genuinely OS-specific once the README is excluded).
-- **~15 files of 94 are truly machine-bound** (`auto-hotkey/`, `docs/vindovs/`,
-  `security-crypto/*.ps1`, `.bash_profile` on Windows; `.config/systemd/user/` and
-  `/etc/mc/mc.vim.keymap` on Linux).
+### What it decided
 
-The trial merges have since been run — see `docs/DESIGN.md` → *Phase 0a, measured: what
-actually conflicts*. Three results change how this phase is executed:
+- **Intra-file variation after reconciliation: zero.** Every machine-specific line was
+  absorbed by `files/shell/machines/<name>.{sh,zsh}`, sourced from `.profile`/`.bashrc`/
+  `.zshrc`. **The corpus needs no templates at all.** This is the gate on Phases 4 and 5 —
+  see *What is now unjustified* below.
+- Four distinct states, not five: `arch-wsl` and `leanoox` are the same commit.
+- `main` was a fifth diverged state carrying only bare-repo machinery. It died with the model.
 
-- There are **four distinct states, not five**: `arch-wsl` and `leanoox` are the same
-  commit (`ef2c5e7`).
-- **All machine-specific content lives in four shell startup files** (`.profile`,
-  `.zprofile`, `.zshrc`, `docs/shared.sh`) plus one line of `.gnupg/gpg-agent.conf` and one
-  `brew install` line. All four have `source`, so they take an **include, not a template**.
-  Reconcile those four by hand first; everything else is drift or app-written churn.
-- `.codex/config.toml` is the one file that cannot be split — authored settings and
-  app-appended `[projects."…"]` tables in one file with no include directive. Do not try to
-  reconcile it line by line; it is the mergiraf case (Phase 4).
+### Three defects found by running it, not by reading it
 
-Scratch clone is at `/tmp/opencode/dotfiles` with `pre-port/*` tags already created
-(**local only — push them before relying on them**). Full conflict text:
-`/tmp/opencode/conflicts.md`.
+1. **`type` is mandatory on any complex target.** `FileTargetInnerRepr` is
+   `#[serde(tag = "type")]` (`src/config.rs:65`), so `{ target = …, recurse = false }` fails
+   to parse with a misleading `data did not match any variant of untagged enum
+   FileTargetOuterRepr` pointing at **line 1**. `default_target_type` applies only to
+   bare-string entries. This is the wart Phase 3c's `link` field removes; the error message
+   is separately worth fixing.
+2. **Handlebars in a hook's own comments is parsed, not ignored.** A comment reading
+   `# The {{#each}} below …` aborted the deploy with an unbalanced-block parse error.
+3. **Scripts escape the scratch `HOME`.** `systemctl --user` resolves the real user, not
+   `$HOME`, so `scripts/systemd/10-enable.sh` enabled a unit in the *actual* session during
+   a sandboxed test (cleaned up afterwards). Any future test of a tree containing `scripts/`
+   must skip the dispatcher or accept real side effects.
 
-`[ ]` Design the target tree **from the dotter model, not from the current repo layout.**
-The existing structure is shaped by the `$HOME`-mirror constraint, which this fork removes.
-Where the current tree only looks the way it does because a destination could not be
-expressed, do not carry the shape over. Specifically:
+### What is now unjustified
 
-- `docs/startup-scripts/link-nvim.{ps1,bat}` — 90 lines of PowerShell + a `.bat` twin,
-    junctioning one directory, demanding admin it does not need. **Delete both**; Phase 1
-    plus a machine file replaces them.
-- `docs/linkables/link_them.sh` — one `sudo ln -s` into `/etc`. **Delete**; dotter has
-    `owner = "root"`.
-- `docs/` currently mixes real config, one-shot setup scripts and dead `legacy-shi/`.
-    Split deliberately; do not port it as one blob.
+`[ ]` **Re-gate Phases 4 and 5.** The count they depend on came out **zero**. Reverse-sync
+      into templates has no user in this corpus. Do not build `dotter merge`'s template
+      path, or the branch classifier, until something actually needs a template. The
+      `.gnupg` case below is the only candidate and it is one line.
 
-`[ ]` Reconcile the drift **first, as its own commit, before any dotter config exists.**
-The 1478-line divergence is not machine-specific and must not be encoded as if it were.
-Pick a winner per file (usually the newest branch), and only what survives that pass is
-eligible to become a machine difference. Skipping this step bakes two years of accident
-into the new structure permanently.
+### Handed back to the user, unresolved
 
-`[ ]` Adopt the two-root layout — `files/` for anything placed somewhere, `scripts/<package>/`
-for anything executed. Rationale, the failure modes each one has, and the verified hook
-dispatcher are in `docs/DESIGN.md` → *Imperative setup*. The dispatcher needs **no dotter
-source change**; write `.dotter/post_deploy.sh` as the template shown there and it works
-today.
-
-`[ ]` **Do not let a script feed a value back into a template** — impossible by design,
-scripts run after rendering. Where a config needs a value only execution can find (the
-`sh.exe` path is the live case), have the *consumer* resolve it at its own runtime so the
-file stays a symlink; only if it cannot compute, have the script write a **generated** file
-the config includes, with a do-not-edit header naming its producer. Full rules in
-`docs/DESIGN.md` → *Variables: authored, discovered, and runtime*.
-
-`[ ]` Convert the existing imperative scripts into `scripts/<package>/` entries. From the
-corpus these are `docs/startup-scripts/setup-certficates.sh` (→ `scripts/certs/`),
-`docs/git-settings.sh`, `docs/startup-scripts/install-init-stuff.sh`,
-`docs/vindovs/manage-startup-apps.ps1`. Each must be **idempotent** — they run on every
-deploy.
-
-`[ ]` Note which of `docs/` is neither: `docs/cfg-bin/git` is a wrapper meant to be on
-`PATH`, so it is a `files/` entry, not a script. `docs/legacy-shi/` is dead — delete it.
-
-`[ ]` Place the **on-demand** commands — the third category, neither placed nor run on
-deploy. Rules and the per-file verdicts are in `docs/DESIGN.md` → *The third category:
-things you run yourself*. Concretely:
-
-- `restore-nvim-session.sh`, `tmux-config.sh` — one line each. **Delete**, make them shell
-    aliases.
-- `no-exe-wrapper-scripts.sh` — generates two static 2-line wrappers. **Delete**; commit
-    `files/bin/wt` and `files/bin/im` instead.
-- `generate-readme.sh` **and** `docs/Makefile` — the same `pandoc` line, twice. Both go;
-    one `just generate-readme` recipe replaces them. That is the **only** recipe left.
-- `backup-remove-and-clone.sh` — **delete**. It is the current bootstrap and every line is
-    replaced (see `docs/DESIGN.md` → *Gaps*).
-- `startup-scripts/configupdatemason.sh` — **delete**. It snapshots `ls
-    ~/.local/share/nvim/mason/packages`, which is the cause of the drift, not a fix for it.
-    Declare one shared roster as a plain file instead.
-
-`[ ]` **Do not hand-merge `mason.lua`.** It is *generated* (see above), so its two divergent
-LSP rosters are a snapshot artifact — whichever machine ran the script last won. Reconcile
-by taking the union of what is actually wanted, commit that as an ordinary file, and leave
-it out of the review diff below.
-
-`[ ]` Keep `.ssh/config` out of the ported tree by hand **before the first push** — it
-carries internal corporate hostnames on a public repo. Real secrets support is deferred
-(`docs/DESIGN.md` → *Gaps* → *Secrets*).
-
-`[ ]` Rewrite `conf` and the `conflazygit`-style aliases as plain `git -C ~/.dotfiles`
-wrappers. No design needed.
-
-`[ ]` Write `.dotter/post_deploy.bat` to resolve `sh.exe` **by absolute path derived from
-`git`** — `where git` → `…\Git\cmd\git.exe` → `…\Git\bin\sh.exe`. Verified on the real
-box: bare `sh` is not on `PATH`, and bare `bash` is `C:\WINDOWS\system32\bash.exe`, the WSL
-launcher, which would run the Windows deploy hook inside Linux and appear to succeed. See
-`docs/DESIGN.md` → *Gaps*.
-
-`[ ]` Deploy `.config/nvim/` as **`recurse = false`** — one whole-directory symlink.
-Verified: this is the only mode where app-written files (`lazy-lock.json`, `lazyvim.json`,
-`.neoconf.json`) land in the repo unaided, which the constitution requires — *"NOTHING
-leaves your dotfiles repo without a breadcrumb back to the source. Guaranteed. No
-edge-cases."* Expansion drops them silently, and a `doctor` check does not fix that (a check
-you must remember to run is itself an edge-case). Reasoning in `docs/DESIGN.md` → *Decided:
-directories expand by default*. **Never** combine a whole-directory symlink with a template
-entry inside it — that path deletes the source file (Phase 0c).
-
-`[ ]` Put machine-specific nvim bits **outside** the linked tree — nothing inside it can be
-templated. In order: a different source file per machine linked to the same destination;
-then an app-native include (`pcall(dofile, …)`) pointing at a separately-deployed path;
-templating only if neither works.
-
-`[ ]` Re-derive the intra-file-variation count **after** drift reconciliation, not before.
-`lua/config/keymaps.lua` was one of the ~3 flagged files and its `arch-wsl` ↔ `windows10`
-diff is a **refactor** (extracted `sterge_buffer` local, loop over `<D-w>`/`<A-w>`/`<A-W>`),
-not machine divergence — the only platform-flavoured token is `<D-w>`, inert elsewhere. The
-pre-reconciliation number is inflated by exactly this noise, and this number gates Phases 4
-and 5.
-
-`[ ]` Define `dot` as `(cd ~/.dotfiles && dotter)` — a subshell, so the caller's CWD is
-untouched. Dotter has no chdir flag and resolves every path from CWD; it fails loudly
-elsewhere, so the alias is the whole fix. A global config at `~/.config/dotter/` was
-considered and **rejected** — it would hold one key and is the only file dotter could never
-deploy to itself. A `-C` flag is the rung above, deliberately not built; both with reasons in
-`docs/DESIGN.md` → *Resolved: dotter must be run from the repo root*.
-
-`[ ]` Express every machine as `.dotter/machines/<name>.toml` + shared layers, using
-composition only, **zero content templates**. Select with `-l` for now (the `machine`
-pointer does not exist yet).
-
-`[ ]` Count the files that genuinely need *intra-file* variation which no app-native
-`include` directive can absorb. Expected from the measurement: **~3** (`.zshrc`,
-`docs/shared.sh`, `.config/nvim/lua/config/keymaps.lua`).
-
-**This number gates Phases 4 and 5.** If it is zero, the reverse-sync machinery has no
-users and must not be built. Nothing downstream is justified until this is measured.
-
-`[ ]` **Produce a review list, do not decide alone.** Most of the 1478 lines reconcile
-mechanically (take the newest branch). Some do not — where both sides made a deliberate,
-incompatible edit. Collect every such file into a single diff for the user to adjudicate.
-`mason.lua` was the presumed example and is **not** one (it is generated — see above), so
-this list may turn out short; report the count either way. Explicitly deferred by the user:
-*"what cannot be easily reconciled from my config you give to me to look at, but not right
-now."*
-
-`[ ]` Keep the pre-port branches reachable (tag them). Phase 5's classifier needs them as
-ground truth: a run over `arch-wsl` vs `windows10` should surface ≈29 candidate lines, not
-1478.
+`[ ]` `.gnupg/gpg-agent.conf` — mac needs `pinentry-program /opt/homebrew/bin/pinentry-mac`
+      and the format has no include directive. Two sources, one linked per machine.
+`[ ]` `.codex/config.toml` `[mcp_servers.complaints]` hardcodes
+      `/mnt/c/Users/istan/repos-projects/…` — work-WSL-specific.
+`[ ]` `.ssh/config` carries corporate hostnames on a public repo. The deferred *secrets* gap.
+`[ ]` Dropped from `windows10` deliberately: the `proiect` alias, a ~50-line commented-out
+      ltex-ls block, and a `.bashrc` that had **stale conflict markers committed** since a
+      botched historical merge, wrapping a ~400-line arduino-cli completion (regenerable
+      with `arduino-cli completion bash`).
+`[ ]` Push the reconciled tree to `github.com/viktorashi/dotfiles` once reviewed. It is a
+      history rewrite of the working model, so it is the user's call, not ours.
 
 ---
 

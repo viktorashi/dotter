@@ -379,6 +379,56 @@ roster — are all conflicts produced by *tools*, not by the user. Combined with
 "apps rewrite their own configs" case from the vision statement, and every one of them
 argues for linking whole rather than rendering.
 
+### Phase 0a, executed: the answer is zero templates
+
+The port was carried out, end to end, in a scratch clone. Result:
+
+**Every machine-specific line in the corpus was absorbed by a shell include.** Four files
+under `files/shell/machines/<name>.{sh,zsh}`, sourced at the end of `.profile`, `.bashrc`
+and `.zshrc`, hold the whole of it: MSYS2 and `/mnt/c/…/Git/bin` PATH entries, `brew
+shellenv`, linuxbrew, pipx, `PNPM_HOME`, the mac keychain `ssh-add`, two site-specific
+variables. Nothing else varied by machine.
+
+**Count of files needing genuine intra-file variation: zero.** That number was the stated
+gate on Phases 4 and 5, and it came out empty, so both are now unjustified until something
+outside this corpus needs a template. The single candidate is `.gnupg/gpg-agent.conf`,
+which needs one mac-only `pinentry-program` line in a format with no include directive —
+and one line is two source files, not a templating engine.
+
+This is the *include vs. template* rule paying for itself: the reason the corpus needs no
+templates is that almost every config format in it already has an include.
+
+#### Three defects the port found by running, not by reading
+
+The plan had been reviewed repeatedly on paper. All three of these appeared within minutes
+of the first real `dotter deploy`.
+
+1. **`type` is mandatory on any complex target.** `FileTargetInnerRepr` is
+   `#[serde(tag = "type")]` (`src/config.rs:65`), so `{ target = "~/.config/nvim", recurse =
+   false }` does not parse — `default_target_type` governs only bare-string entries. The
+   error is `data did not match any variant of untagged enum FileTargetOuterRepr` reported
+   **at line 1, column 1** of the file, which points at whatever the file happens to start
+   with. This is the strongest concrete argument yet for the `link` field: `recurse` is a
+   property of the source being a directory, and requiring the user to also assert
+   `type = "symbolic"` to use it is the conflation, visible.
+
+2. **A hook's own comments are rendered.** `.dotter/post_deploy.sh` carried the line
+   `# The {{#each}} below is rendered by dotter …`, describing the dispatcher. Handlebars
+   parsed it as an unbalanced block and the deploy died. Hooks are rendered whole; there is
+   no comment syntax that hides from the renderer. Any documentation of handlebars, inside
+   a file that handlebars will see, has to describe it without writing it.
+
+3. **Scripts are not sandboxed by `HOME`.** `systemctl --user` resolves the invoking user
+   through the session bus, not `$HOME`, so a deploy run with `HOME=/tmp/…` still enabled a
+   unit in the real user session. Anything with a daemon, a system database or a package
+   manager behind it will do the same. Two consequences: a scratch-`HOME` test of a tree
+   containing `scripts/` is *not* a dry run, and the `dotter watch` re-runs-everything gap
+   is worse than a performance problem.
+
+Undeploy was clean — all 33 links removed, nothing orphaned — with exactly one exception:
+the symlink created by `scripts/vim/10-obsession.sh` stayed. That is the already-recorded
+*undeploy does not undo `scripts/`* gap, now demonstrated rather than predicted.
+
 ## Prior art: nobody shipped this
 
 Fork audit (GitHub API, 2026-08):
