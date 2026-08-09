@@ -163,7 +163,8 @@ pub fn get_options() -> Options {
         }
     }
 
-    let repo_settings = load_settings_file(std::path::Path::new("dotter.toml")).unwrap_or_default();
+    let repo_settings = load_settings_file(std::path::Path::new("dotter.toml")).unwrap_or_default(); //not
+    //sure what the default here would be tho
 
     let from_cli = |id: &str| {
         matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine)
