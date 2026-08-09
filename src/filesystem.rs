@@ -834,7 +834,7 @@ pub fn is_template(source: &Path) -> Result<bool> {
         Ok(false)
     } else if buf.contains("{{") {
         warn!(
-            "File {:?} contains \"{{\" - detecting as template. Explicitly specify it to silence this message.",
+            "File {:?} contains \"{{{{\" - detecting as template. Explicitly specify it to silence this message.",
             source
         );
         Ok(true)
