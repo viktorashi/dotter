@@ -2,125 +2,11 @@
 
 **Session ID:** ses_033099ad3ffe4TwNgzpp28gaO1
 **Created:** 8/4/2026, 4:28:47 PM
-**Updated:** 8/8/2026, 6:53:57 PM
+**Updated:** 8/8/2026, 7:51:48 PM
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 4.4s)
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 20.6s)
-
-_Thinking:_
-
-
-
-Plan is explicit. Executing the restructure.
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 12.1s)
-
-_Thinking:_
-
-
-
-`docs/cfg-bin/git` turns out to be pure bare-repo machinery (backup-on-checkout for `.cfg`) — it dies with the model, not a `files/` entry. Executing:
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 12.8s)
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 9.0s)
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 5.8s)
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 4.8s)
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 5.9s)
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 21.9s)
-
-_Thinking:_
-
-
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 5.9s)
-
-_Thinking:_
-
-
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 5.6s)
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 25.5s)
-
-**Tool: write**
-
----
-
-## Assistant (Build · Claude Opus 5 · 15.2s)
-
-_Thinking:_
-
-
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 14.4s)
-
-Now the hook dispatcher and the shell-side include:
-
-**Tool: bash**
-
----
-
-## Assistant (Build · Claude Opus 5 · 27.0s)
-
-_Thinking:_
-
-
+## Assistant
 
 The `.bat` is itself the rendered hook on Windows — it can't shell out to the un-rendered `.sh`. Fixing:
 
@@ -128,111 +14,91 @@ The `.bat` is itself the rendered hook on Windows — it can't shell out to the 
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 12.0s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 6.3s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 6.8s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 4.7s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 11.0s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.5s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 4.4s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.5s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 20.8s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.1s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 11.7s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 8.3s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 13.1s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 46.3s)
+## Assistant
 
 **Tool: compress**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 45.0s)
+## Assistant
 
 **Tool: compress**
 
@@ -249,61 +115,37 @@ _Thinking:_
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 4.9s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 9.9s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 11.2s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 9.6s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 9.8s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 11.1s)
-
-_Thinking:_
-
-
+## Assistant
 
 Found it: `type` is **mandatory** on any complex target (`FileTargetInnerRepr` is `#[serde(tag = "type")]`, config.rs:65). `default_target_type` only applies to bare-string entries.
 
@@ -311,27 +153,19 @@ Found it: `type` is **mandatory** on any complex target (`FileTargetInnerRepr` i
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 3.9s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 7.2s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 11.5s)
-
-_Thinking:_
-
-
+## Assistant
 
 The comment on line 3 literally contains `{{#each}}` — handlebars parses it as an unclosed block.
 
@@ -339,11 +173,7 @@ The comment on line 3 literally contains `{{#each}}` — handlebars parses it as
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 10.7s)
-
-_Thinking:_
-
-
+## Assistant
 
 Deploy works. But `scripts/systemd/10-enable.sh` escaped the scratch `HOME` — `systemctl --user` resolves the real user, not `$HOME`.
 
@@ -351,41 +181,25 @@ Deploy works. But `scripts/systemd/10-enable.sh` escaped the scratch `HOME` — 
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 11.4s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 8.5s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 11.0s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 7.8s)
-
-_Thinking:_
-
-
+## Assistant
 
 Deploy and undeploy both verified end-to-end. Committing the three fixes.
 
@@ -393,7 +207,7 @@ Deploy and undeploy both verified end-to-end. Committing the three fixes.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.8s)
+## Assistant
 
 Now the readme, then writing everything back into the dotter docs.
 
@@ -401,21 +215,13 @@ Now the readme, then writing everything back into the dotter docs.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 7.8s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 20.9s)
-
-_Thinking:_
-
-
+## Assistant
 
 pandoc is absent, and the two-file split existed only so pandoc could inline script bodies. The new README has nothing to inline — collapsing to one file, which also empties the justfile.
 
@@ -423,13 +229,13 @@ pandoc is absent, and the two-file split existed only so pandoc could inline scr
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 6.5s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 6.1s)
+## Assistant
 
 Now writing the Phase 0a results back into the dotter repo docs.
 
@@ -437,29 +243,25 @@ Now writing the Phase 0a results back into the dotter repo docs.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 4.7s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.8s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 27.1s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 6.2s)
+## Assistant
 
 Now the DESIGN.md side — the three defects and the zero-templates result.
 
@@ -467,19 +269,19 @@ Now the DESIGN.md side — the three defects and the zero-templates result.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 28.1s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 42.1s)
+## Assistant
 
 **Tool: compress**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 60.6s)
+## Assistant
 
 **Tool: compress**
 
@@ -496,21 +298,13 @@ Now the DESIGN.md side — the three defects and the zero-templates result.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 15.3s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 12.9s)
-
-_Thinking:_
-
-
+## Assistant
 
 Phase 0a is closed and pushed. Tree clean, `src/` still byte-identical to `origin/master`.
 
@@ -547,27 +341,19 @@ but yeah, if you think this fine, then we can go ahead solving those data loss a
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 6.9s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.2s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 32.5s)
-
-_Thinking:_
-
-
+## Assistant
 
 Tags pushed. `reconcile` is up at `origin/reconcile`, five `pre-port/*` tags now on the remote as Phase 5 ground truth. Nothing rewritten, nothing forced.
 
@@ -596,11 +382,7 @@ Now Phase 0c. Let me re-read the plan before cutting the branch.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.8s)
-
-_Thinking:_
-
-
+## Assistant
 
 Plan is settled. Cutting the branch and reproducing first.
 
@@ -608,53 +390,37 @@ Plan is settled. Cutting the branch and reproducing first.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.9s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 4.3s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 12.7s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 9.0s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 7.0s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 14.4s)
-
-_Thinking:_
-
-
+## Assistant
 
 Reproduced — `files/nvim/lua/keys.lua` is gone from the repo. Now the guard.
 
@@ -662,19 +428,19 @@ Reproduced — `files/nvim/lua/keys.lua` is gone from the repo. Now the guard.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 4.2s)
+## Assistant
 
 **Tool: edit**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 3.5s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 9.1s)
+## Assistant
 
 Now the guard. It belongs only on the template paths — for a symlink, target-is-source is the *desired* end state.
 
@@ -682,7 +448,7 @@ Now the guard. It belongs only on the template paths — for a symlink, target-i
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 42.1s)
+## Assistant
 
 **Tool: bash**
 
@@ -701,11 +467,7 @@ If one of those machines is the one in your local.toml, then hard-error. If it's
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 155.9s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: compress**
 
@@ -722,31 +484,19 @@ _Thinking:_
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 15.8s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 8.2s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 32.1s)
-
-_Thinking:_
-
-
+## Assistant
 
 The branch got re-pointed — `up/self-overwrite-guard` now sits on top of `52a0606`, so it carries all the fork docs. That breaks the "cut from `origin/master`, only `src/`+`tests/`" rule. Cheap fix later: fresh branch from `origin/master`, cherry-pick just the `src/`+`Cargo` hunks. No history rewritten, nothing forced.
 
@@ -777,51 +527,43 @@ This is fork-only and gated on Phase 3 (`up/machine-field`), since dotter has no
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 3.7s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 20.7s)
+## Assistant
 
 **Tool: edit**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 3.1s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 9.5s)
+## Assistant
 
 **Tool: edit**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 3.4s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 9.0s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 6.3s)
-
-_Thinking:_
-
-
+## Assistant
 
 Never pushed, so I can redo it cleanly without rewriting anything published.
 
@@ -829,13 +571,13 @@ Never pushed, so I can redo it cleanly without rewriting anything published.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.8s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 112.2s)
+## Assistant
 
 Docs on `viktorashi` (`src/` still clean), guard branch re-cut from `origin/master` carrying only the code. Now finishing it.
 
@@ -843,17 +585,13 @@ Docs on `viktorashi` (`src/` still clean), guard branch re-cut from `origin/mast
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 6.6s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 9.9s)
-
-_Thinking:_
-
-
+## Assistant
 
 Source survives. Now checking it doesn't break the normal case.
 
@@ -861,61 +599,49 @@ Source survives. Now checking it doesn't break the normal case.
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 31.0s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 7.0s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 4.3s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 23.0s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 13.4s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 5.1s)
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 14.5s)
-
-_Thinking:_
-
-
+## Assistant
 
 **Tool: bash**
 
 ---
 
-## Assistant (Build · Claude Opus 5 · 19.9s)
+## Assistant
 
 Done. `up/self-overwrite-guard` is cut from `origin/master`, carries only `src/actions.rs` + `Cargo.toml` + lockfile, and is pushed. Nothing rewritten, nothing forced.
 
@@ -963,6 +689,197 @@ Your validation idea went in alongside it, with two refinements it needed: exclu
 One consequence you should know about: the `reconcile` branch of your dotfiles now has four `.dotter/machines/*.toml` files carrying `[files]` blocks that this rule forbids. That's a todo item, not urgent — nothing breaks until Phase 3 enforces it.
 
 Next in the queue is `up/watch-filter` (#196, the infinite watch loop). Want me to go, or do you want to open this PR first and see how he reacts before spending more on branches?
+
+---
+
+## User
+
+oops sorry for breaking that rule, yeah do the cheap fix later
+the 2. refinement kinda confuses me on having a link that's a whole dir, then another one that 's a file INSIDE that dir? does that even work cross-platofrm with all different types of links? how do we handle that?
+
+we could also do feature request of machine concepts for now, then solve our own feature request no?
+
+to put in todo 
+
+aight now i filed the bug request
+https://github.com/SuperCuber/dotter/issues/218
+
+and u can go ahead and solve it in its own clean branch in viktorashi and i open the PR
+
+
+
+---
+
+## Assistant
+
+**Tool: github-personal_get_issue**
+
+---
+
+## Assistant
+
+#218 is the bug I already fixed — `up/self-overwrite-guard` is pushed and ready. You just open the PR; add `Closes #218` to the body and GitHub will close it on merge.
+
+Now your question, because the answer changes the rule I wrote.
+
+**No, it doesn't work — and that's the point.** The containment check exists to *reject* the combination, not to support it. But I was imprecise: containment is only wrong when the containing entry is a **whole-directory link** (`recurse = false`). With `recurse = true` there is no containing link at all — dotter creates a real directory and a symlink per file, and a more specific template entry for one file inside it works correctly (verified earlier: the source is untouched, the specific entry wins).
+
+Cross-platform doesn't rescue it either, and that's worth being concrete about:
+
+| link type | inner write goes | result |
+|---|---|---|
+| unix symlink to dir | through the link | lands in the repo |
+| Windows junction | through the link | lands in the repo |
+| Windows hard link | n/a | can't hard-link a directory |
+| copy | into the copy | inner entry silently ignored |
+
+Every row is wrong in a different way. No link type makes it sane, so there's nothing to *handle* — the two modes are mutually exclusive, which is already the documented position for directories.
+
+Fixing the rule and adding your feature-request idea.
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: compress**
+
+---
+
+## User
+
+▣ DCP | -569.3K removed, +60.5K summary
+
+│░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░⣿⣿█│
+▣ Compression #16 -18K removed, +60.5K summary
+→ Topic: Phase 0c self-overwrite guard shipped; machine-files rule reversed
+→ Items: 38 messages and 36 tools compressed
+
+---
+
+## Assistant
+
+Everything's landed. State:
+
+**`up/self-overwrite-guard`** @ `51bccab`, cut clean from `origin/master`, pushed. Diff is `Cargo.toml +1`, `Cargo.lock +1`, `src/actions.rs +62`. No fork docs on it — the hygiene fix is already done, done without rewriting anything published since the branch had never been pushed at the time.
+
+Open the PR with title `Refuse to deploy a template onto its own source` and the body from my earlier message, with `Closes #218` added.
+
+**Your containment question changed the rule**, and for the better — the check now only fires when the outer entry is a single whole-directory link. Under `recurse = true` an inner entry is legitimate and must not be flagged. The cross-platform table is in `docs/DESIGN.md`; short version is that no link type makes the combination meaningful, so it's a rejection rather than something to support.
+
+**Your feature-request idea is in Phase 3** as the first item: file "machines as a first-class concept" as an issue, let him object, then open `up/machine-field` against it. That's the same order that just worked for #218, and it matters more here because feature PRs to this repo are 0-for-5 while issues get answered same-day.
+
+`docs/` committed as `ea7ea28` and pushed. `src/` on `viktorashi` still byte-identical to `origin/master`.
+
+Next is `up/watch-filter` (#196). Fair warning on scope: the root cause is certain but the fix is not — I know the `!`-prefixed globs go into the wrong `GlobsetFilterer` argument, but it was never established that correcting that alone stops the loop, and three separate test-methodology flaws bit during the last investigation. It's a bigger session than 0c was. Want me to start, or take a break here?
+
+---
+
+## User
+
+aight
+https://github.com/SuperCuber/dotter/pull/219
+now do the next up
+
+---
+
+## Assistant
+
+**Tool: todowrite**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+---
+
+## User
+
+nvm, stop right here. draft shor-but-comprehensive prompt for another claude model to take on your work from here, cuz this chat is becoming wayy to long
+
+---
+
+## Assistant
+
+Nothing from this turn needs saving — re-reading `watch.rs` and `watchexec-filterer-globset` only confirmed what's already written in `docs/DESIGN.md` § *Recon log*. So the handoff is clean.
+
+---
+
+```markdown
+You're picking up work on a fork of dotter (a dotfiles manager) at `/home/istan/dotter`.
+
+## Read these first, in order
+1. `AGENTS.md` — the vision, the working rules, the branch policy. The rules are
+   binding, especially: verify don't assert; never leave findings in chat, they go in
+   `docs/`; no PR ever from the `viktorashi` branch.
+2. `docs/DESIGN.md` — every architectural decision and, importantly, every *rejected*
+   alternative with its reason. Long. The `## In one page` section at the top is the
+   way in. Don't re-litigate anything in here without reading why it was decided.
+3. `docs/todo.md` — the ordered work queue. This is what to do next.
+
+Ignore `docs/session-*.md` in searches — they're chat dumps, superseded by the two docs
+above.
+
+## Where things stand
+- `src/` on branch `viktorashi` is byte-identical to `origin/master`. All fork work so
+  far is documentation plus one shipped upstream fix.
+- Phase 0a is done: the user's dotfiles (`github.com/viktorashi/dotfiles`, five diverged
+  branches) were reconciled into one tree on the `reconcile` branch. Headline result:
+  **zero files needed templating** — all machine divergence fit into shell includes.
+  That result re-gates Phases 4 and 5, which are now unjustified until something needs
+  a template.
+- Phase 0c is done and upstream: issue #218 → PR #219, branch `up/self-overwrite-guard`.
+
+## Your next task: Phase 0b′, branch `up/watch-filter` (upstream issue #196)
+
+`dotter watch` deploys in an infinite loop. Root cause is **certain and verified**:
+`src/watch.rs` passes `!`-prefixed globs as `GlobsetFilterer::new`'s 2nd argument
+(`filters`) leaving the 3rd (`ignores`) empty. A leading `!` is a gitignore *negation*,
+so `filters.num_ignores() == 0`, and `watchexec-filterer-globset-8.0.0/src/lib.rs:176`
+skips the entire filter block. Nothing is ever excluded, so dotter's own cache writes
+retrigger it. Fix direction: move the globs to `ignores` and drop the `!`.
+
+**It is NOT established that this fix alone stops the loop.** Some runs still looped.
+Three test-methodology traps were found the hard way and are documented in
+`docs/DESIGN.md` § *Recon log* — read that subsection before testing, it will save you
+an afternoon.
+
+Acceptance criteria before opening the PR:
+- 0 deploys when nothing changes
+- exactly 1 deploy per real source edit
+- deploy target **and** log file both outside the watched tree
+- identical results at `-v` and `-vvv`
+
+Branch is cut fresh from `origin/master`, contains only `src/` (+ `Cargo.*` if needed),
+named `up/watch-filter`, pushed to remote `viktorashi`. The user opens the PR, not you —
+hand them a body and a title.
+
+## How this maintainer behaves (measured, matters for scoping)
+Small obviously-correct bug fixes merge same-day. Feature PRs are 0-for-5; #190 has sat
+unreviewed since Nov 2024. He answers *issues* fast and politely. So: file an issue
+first, let him object, then PR against it. Never open a feature PR cold.
+```
+
+Two notes for whoever picks it up, which I'd tell them out loud rather than put in the prompt: the `up/watch-filter` job is genuinely riskier than #218 was — the fix is a one-liner but the *verification* is the work, and last time three separate testing mistakes produced three different wrong answers. And there's a stale top-level `.dotfiles/` directory tracked on `viktorashi` (13 files, an abandoned early worked example) that should just be deleted when convenient.
 
 ---
 
