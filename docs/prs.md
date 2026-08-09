@@ -19,6 +19,8 @@ Fixes an infinite recursion loop in `dotter watch`. The root cause was that `!`-
 Fixes a silent failure/asymmetry when detecting templates. Currently, in `filesystem.rs`, if a file is not UTF-8, it logs a warning and explains how to skip the file using `type = "symbolic"`. However, if the file is valid UTF-8 and contains `{{` (e.g., standard code or config like `yazi` theme), it silently treats it as a template. If the file is not valid Handlebars, dotter crashes during deployment on a line the user didn't write as a template. This PR adds a symmetric `warn!` for the `{{` detection branch, reusing the maintainer's existing wording, and suggests using `.tmpl` or `type = "symbolic"` to silence it. 
 
 ## Branch: `up/windows-link-fallback`
+
+<!-- TODO: when im back at a windows machine actually check this and build n shit see if it works, cuz otherwise it's waste of everyones time  -->
 *(You need to create an issue for this: "Feature: Support hard links and junctions on Windows when symlinks are unavailable")*
 
 **Description:**
