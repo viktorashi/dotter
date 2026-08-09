@@ -136,10 +136,24 @@ type IncludedConfig = BTreeMap<String, Package>;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct MachineConfig {
+    #[serde(default)]
+    packages: Vec<String>,
+    #[serde(default)]
+    // for one-off files
+    files: Files,
+    #[serde(default)]
+    // for machine-specific single-value variables
+    variables: Variables,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct LocalConfig {
     #[serde(default)]
     includes: Vec<PathBuf>,
-    packages: Vec<String>,
+    packages: Option<Vec<String>>,
+    machine: Option<String>,
     #[serde(default)]
     files: Files,
     #[serde(default)]
@@ -170,10 +184,31 @@ pub fn load_configuration(
         local_config_buf.set_file_name(format!("{hostname}.toml"));
     }
 
-    let local: LocalConfig = filesystem::load_file(local_config_buf.as_path())
+    let mut local: LocalConfig = filesystem::load_file(local_config_buf.as_path())
         .and_then(|c| c.ok_or_else(|| anyhow::anyhow!("file not found")))
         .with_context(|| format!("load local config {local_config:?}"))?;
     trace!("Local config: {:#?}", local);
+
+    match (&local.packages, &local.machine) {
+        (Some(_), Some(_)) => anyhow::bail!("local config cannot specify both `packages` and `machine`"),
+        (None, None) => anyhow::bail!("local config must specify either `packages` or `machine`"),
+        _ => {}
+    }
+
+    if let Some(machine_name) = &local.machine {
+        let machine_path = local_config_buf.parent().unwrap_or(std::path::Path::new("")).join("machines").join(format!("{}.toml", machine_name));
+        let machine_config: MachineConfig = filesystem::load_file(&machine_path)
+            .and_then(|c| c.ok_or_else(|| anyhow::anyhow!("file not found")))
+            .with_context(|| format!("load machine config {machine_path:?}"))?;
+        
+        local.packages = Some(machine_config.packages);
+
+        // one-off machine-specific overrides
+        local.files.extend(machine_config.files);
+        for (k, v) in machine_config.variables {
+            local.variables.insert(k, v);
+        }
+    }
 
     let mut merged_config =
         merge_configuration_files(global, local, patch).context("merge configuration files")?;
@@ -245,7 +280,8 @@ pub fn save_dummy_config(
 
     let local_config = LocalConfig {
         includes: vec![],
-        packages: vec!["default".into()],
+        packages: Some(vec!["default".into()]),
+        machine: None,
         files: Files::default(),
         variables: Variables::default(),
     };
@@ -312,7 +348,7 @@ fn merge_configuration_files(
     }
 
     // Enable depended packages
-    let mut enabled_packages = local.packages.clone().into_iter().collect::<BTreeSet<_>>();
+    let mut enabled_packages = local.packages.unwrap_or_default().into_iter().collect::<BTreeSet<_>>();
     let mut package_count = 0;
 
     // Keep iterating until there's nothing new added
