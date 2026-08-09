@@ -147,7 +147,12 @@ pub fn get_options() -> Options {
     let matches = Options::command().get_matches();
     let mut opt = Options::from_arg_matches(&matches).unwrap();
 
+    //TODO: do you agree, mr. maintainer SuperCuber, with the decision of having the config file
+    //come from whatever `dirs` considers the platform-specific dirs? namely: https://docs.rs/dirs/latest/dirs/fn.config_dir.html
+    //or should we make it all be just ~/.config/dotter/dotter.toml?
+    //first of all, i like that path for MacOS as well, and it also works for Windows, technically. `~/` resolved everywhere.
     let global_settings = dirs::config_dir()
+        // dotter/dotter.toml
         .map(|d| d.join("dotter").join("dotter.toml"))
         .and_then(|p: std::path::PathBuf| load_settings_file(&p))
         .unwrap_or_default();
