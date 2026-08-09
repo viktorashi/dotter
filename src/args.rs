@@ -3,6 +3,12 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, CommandFactory, FromArgMatches};
 use clap_complete::Shell;
 
+type ForceType = bool;
+type NoConfirmType = bool;
+type QuietType= bool;
+type DiffContextLinesType= usize;
+type VerbosityType = u8;
+
 /// A small dotfile manager.
 #[derive(Debug, Parser, Default, Clone)]
 #[clap(author, version, about, long_about = None)]
@@ -59,20 +65,20 @@ pub struct Options {
     /// Verbosity level - specify up to 3 times to get more detailed output.
     /// Specifying at least once prints the differences between what was before and after Dotter's run
     #[clap(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
-    pub verbosity: u8,
+    pub verbosity: VerbosityType,
 
     /// Quiet - only print errors
     #[clap(short, long, value_parser, global = true)]
-    pub quiet: bool,
+    pub quiet: QuietType,
 
     /// Force - instead of skipping, overwrite target files if their content is unexpected.
     /// Overrides --dry-run.
     #[clap(short, long, value_parser, global = true)]
-    pub force: bool,
+    pub force: ForceType,
 
     /// Assume "yes" instead of prompting when removing empty directories
     #[clap(short = 'y', long = "noconfirm", global = true)]
-    pub noconfirm: bool,
+    pub noconfirm: NoConfirmType,
 
     /// Take standard input as an additional files/variables patch, added after evaluating
     /// `local.toml`. Assumes --noconfirm flag because all of stdin is taken as the patch.
@@ -81,7 +87,7 @@ pub struct Options {
 
     /// Amount of lines that are printed before and after a diff hunk.
     #[clap(long, value_parser, default_value = "3")]
-    pub diff_context_lines: usize,
+    pub diff_context_lines: DiffContextLinesType,
 
     #[clap(subcommand)]
     pub action: Option<Action>,
@@ -122,11 +128,11 @@ pub enum Action {
 #[serde(default)]
 pub struct DotterSettings {
     pub repo: Option<PathBuf>,
-    pub force: Option<bool>,
-    pub noconfirm: Option<bool>,
-    pub quiet: Option<bool>,
-    pub diff_context_lines: Option<usize>,
-    pub verbosity: Option<u8>,
+    pub force: Option<ForceType>,
+    pub noconfirm: Option<NoConfirmType>,
+    pub quiet: Option<QuietType>,
+    pub diff_context_lines: Option<DiffContextLinesType>,
+    pub verbosity: Option<VerbosityType>,
 }
 
 fn load_settings_file(path: &std::path::Path) -> Option<DotterSettings> {
