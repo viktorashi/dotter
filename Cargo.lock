@@ -511,6 +511,7 @@ dependencies = [
  "log",
  "maplit",
  "mockall",
+ "same-file",
  "serde",
  "shellexpand",
  "simplelog",
