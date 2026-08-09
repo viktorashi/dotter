@@ -145,7 +145,7 @@ fn load_settings_file(path: &std::path::Path) -> Option<DotterSettings> {
 
 pub fn get_options() -> Options {
     let matches = Options::command().get_matches();
-    let mut opt = Options::from_arg_matches(&matches).unwrap();
+    let mut opt = Options::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 
     //TODO: do you agree, mr. maintainer SuperCuber, with the decision of having the config file
     //come from whatever `dirs` considers the platform-specific dirs? namely: https://docs.rs/dirs/latest/dirs/fn.config_dir.html
