@@ -10,10 +10,12 @@ type DiffContextLinesType= usize;
 type VerbosityType = u8;
 
 macro_rules! merge_setting {
-    ($opt:expr, $matches:expr, $repo:expr, $global:expr, $field:ident) => {
+    ($opt:expr, $matches:expr, $repo:expr, $global:expr, [ $($field:ident),+ ]) => {
+        $(
         if $matches.value_source(stringify!($field)) != Some(clap::parser::ValueSource::CommandLine) {
             $opt.$field = $repo.$field.or($global.$field).unwrap_or($opt.$field);
         }
+        )+
     };
 }
 
@@ -173,10 +175,13 @@ pub fn get_options() -> Options {
 
     let repo_settings = load_settings_file(std::path::Path::new("dotter.toml")).unwrap_or_default();
 
-    merge_setting!(opt, matches, repo_settings, global_settings, noconfirm);
-    merge_setting!(opt, matches, repo_settings, global_settings, quiet);
-    merge_setting!(opt, matches, repo_settings, global_settings, diff_context_lines);
-    merge_setting!(opt, matches, repo_settings, global_settings, verbosity);
+    merge_setting!(
+        opt,
+        matches,
+        repo_settings,
+        global_settings,
+        [noconfirm, quiet, diff_context_lines, verbosity]
+    );
 
     if opt.dry_run {
         opt.verbosity = std::cmp::max(opt.verbosity, 1);
