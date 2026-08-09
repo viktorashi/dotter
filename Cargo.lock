@@ -506,10 +506,12 @@ dependencies = [
  "handlebars",
  "handlebars_misc_helpers",
  "hostname",
+ "junction",
  "libc",
  "log",
  "maplit",
  "mockall",
+ "same-file",
  "serde",
  "shellexpand",
  "simplelog",
@@ -1211,6 +1213,16 @@ checksum = "8c942ebf8e95485ca0d52d97da7c5a2c387d0e7f0ba4c35e93bfcaee045955b3"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "junction"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "160f2eade097f30263b548aae5deb12ad349c909baa710fa24b92c9090b2e006"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

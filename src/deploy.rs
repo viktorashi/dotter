@@ -70,9 +70,9 @@ pub fn deploy(opt: &Options) -> Result<bool> {
         true
     } else {
         warn!(
-            "No permission to create symbolic links.\n
-On Windows, in order to create symbolic links you need to enable Developer Mode.\n
-Proceeding by copying instead of symlinking."
+            "No permission to create symbolic links.\n\
+On Windows, in order to create symbolic links you need to enable Developer Mode.\n\
+Proceeding with hard links for files (same drive only) and NTFS junctions for directories."
         );
         false
     };
@@ -100,12 +100,30 @@ Proceeding by copying instead of symlinking."
                 }
             }
         } else {
+            // symlinks disabled, use hard links / junctions if possible
             match target {
                 FileTarget::Automatic(target) => {
-                    desired_templates.insert(source, target.into());
+                    if filesystem::is_template(&source)
+                        .context(format!("check whether {source:?} is a template"))?
+                    {
+                        desired_templates.insert(source, target.into());
+                    } else if source.is_dir() {
+                        // directory -> junction
+                        desired_symlinks.insert(source, target.into());
+                    } else if filesystem::is_same_volume(&source, &target).unwrap_or(false) {
+                        // file on same volume -> hardlink
+                        desired_symlinks.insert(source, target.into());
+                    } else {
+                        // file on different volume -> copy
+                        desired_templates.insert(source, target.into());
+                    }
                 }
                 FileTarget::Symbolic(target) => {
-                    desired_templates.insert(source, target.into_template());
+                    if source.is_dir() || filesystem::is_same_volume(&source, &target.target).unwrap_or(false) {
+                        desired_symlinks.insert(source, target);
+                    } else {
+                        desired_templates.insert(source, target.into_template());
+                    }
                 }
                 FileTarget::ComplexTemplate(target) => {
                     desired_templates.insert(source, target);
