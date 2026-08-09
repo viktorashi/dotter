@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, CommandFactory, FromArgMatches};
 use clap_complete::Shell;
 
 /// A small dotfile manager.
@@ -118,8 +118,62 @@ pub enum Action {
     },
 }
 
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct DotterSettings {
+    pub repo: Option<PathBuf>,
+    pub force: Option<bool>,
+    pub noconfirm: Option<bool>,
+    pub quiet: Option<bool>,
+    pub diff_context_lines: Option<usize>,
+    pub verbosity: Option<u8>,
+}
+
+fn load_settings_file(path: &std::path::Path) -> Option<DotterSettings> {
+    if let Ok(content) = std::fs::read_to_string(path) {
+        toml::from_str(&content).ok()
+    } else {
+        None
+    }
+}
+
 pub fn get_options() -> Options {
-    let mut opt = Options::parse();
+    let matches = Options::command().get_matches();
+    let mut opt = Options::from_arg_matches(&matches).unwrap();
+
+    let global_settings = dirs::config_dir()
+        .map(|d| d.join("dotter").join("dotter.toml"))
+        .and_then(|p: std::path::PathBuf| load_settings_file(&p))
+        .unwrap_or_default();
+
+    if let Some(repo) = &global_settings.repo {
+        if let Err(e) = std::env::set_current_dir(repo) {
+            log::warn!("Failed to cd to repo {:?}: {}", repo, e);
+        }
+    }
+
+    let repo_settings = load_settings_file(std::path::Path::new("dotter.toml")).unwrap_or_default();
+
+    let from_cli = |id: &str| {
+        matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine)
+    };
+
+    if !from_cli("force") {
+        opt.force = repo_settings.force.or(global_settings.force).unwrap_or(opt.force);
+    }
+    if !from_cli("noconfirm") {
+        opt.noconfirm = repo_settings.noconfirm.or(global_settings.noconfirm).unwrap_or(opt.noconfirm);
+    }
+    if !from_cli("quiet") {
+        opt.quiet = repo_settings.quiet.or(global_settings.quiet).unwrap_or(opt.quiet);
+    }
+    if !from_cli("diff_context_lines") {
+        opt.diff_context_lines = repo_settings.diff_context_lines.or(global_settings.diff_context_lines).unwrap_or(opt.diff_context_lines);
+    }
+    if !from_cli("verbosity") {
+        opt.verbosity = repo_settings.verbosity.or(global_settings.verbosity).unwrap_or(opt.verbosity);
+    }
+
     if opt.dry_run {
         opt.verbosity = std::cmp::max(opt.verbosity, 1);
     }
