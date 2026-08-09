@@ -107,7 +107,7 @@ impl Filesystem for RealFilesystem {
         let link_state = get_file_state(link).context("get link state")?;
         trace!("Link state: {:#?}", link_state);
 
-        compare_symlink(source, source_state, link_state)
+        compare_symlink(source, link, source_state, link_state)
     }
 
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison> {
@@ -168,12 +168,25 @@ impl Filesystem for RealFilesystem {
             );
         }
         let real_source_path = real_path(target).context("get real path of source file")?;
-        if real_source_path.is_dir() {
-            fs::symlink_dir(real_source_path, link)
+        
+        let symlink_res = if real_source_path.is_dir() {
+            fs::symlink_dir(&real_source_path, link)
         } else {
-            fs::symlink_file(real_source_path, link)
+            fs::symlink_file(&real_source_path, link)
+        };
+
+        match symlink_res {
+            Ok(()) => Ok(()),
+            Err(e) if e.raw_os_error() == Some(1314) => {
+                // PrivilegeNotHeld, fallback to junction or hard link
+                if real_source_path.is_dir() {
+                    junction::create(&real_source_path, link).context("create junction instead of symlink")
+                } else {
+                    std::fs::hard_link(&real_source_path, link).context("create hard link instead of symlink")
+                }
+            }
+            Err(e) => Err(e).context("create symlink"),
         }
-        .context("create symlink")
     }
 
     fn create_dir_all(&mut self, path: &Path, owner: &Option<UnixUser>) -> Result<()> {
@@ -273,7 +286,7 @@ impl Filesystem for RealFilesystem {
         let source_state = get_file_state(source).context("get source state")?;
         let link_state = get_file_state(link).context("get link state")?;
 
-        compare_symlink(source, source_state, link_state)
+        compare_symlink(source, link, source_state, link_state)
     }
 
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison> {
@@ -573,7 +586,7 @@ impl Filesystem for DryRunFilesystem {
             state
         };
 
-        compare_symlink(source, source_state, link_state)
+        compare_symlink(source, link, source_state, link_state)
     }
 
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison> {
@@ -736,6 +749,7 @@ impl std::fmt::Display for SymlinkComparison {
 
 fn compare_symlink(
     source_path: &Path,
+    link_path: &Path,
     source_state: FileState,
     link_state: FileState,
 ) -> Result<SymlinkComparison> {
@@ -750,6 +764,13 @@ fn compare_symlink(
         }
         (FileState::Missing, FileState::Missing) => SymlinkComparison::BothMissing,
         (_, FileState::Missing) => SymlinkComparison::OnlySourceExists,
+        (FileState::File(_), FileState::File(_)) | (FileState::Directory, FileState::Directory) => {
+            if same_file::is_same_file(source_path, link_path).unwrap_or(false) {
+                SymlinkComparison::Identical
+            } else {
+                SymlinkComparison::TargetNotSymlink
+            }
+        }
         _ => SymlinkComparison::TargetNotSymlink,
     })
 }
@@ -864,6 +885,28 @@ pub fn symlinks_enabled(test_file_path: &Path) -> Result<bool> {
 
 #[cfg(unix)]
 pub fn symlinks_enabled(_test_file_path: &Path) -> Result<bool> {
+    Ok(true)
+}
+
+#[cfg(windows)]
+pub fn is_same_volume(path1: &Path, path2: &Path) -> Result<bool> {
+    let abs1 = std::env::current_dir()?.join(path1);
+    let abs2 = std::env::current_dir()?.join(path2);
+    
+    let get_prefix = |p: &Path| -> Option<std::path::Prefix> {
+        p.components().find_map(|c| {
+            if let std::path::Component::Prefix(prefix) = c {
+                Some(prefix.kind())
+            } else {
+                None
+            }
+        })
+    };
+    Ok(get_prefix(&abs1) == get_prefix(&abs2))
+}
+
+#[cfg(unix)]
+pub fn is_same_volume(_path1: &Path, _path2: &Path) -> Result<bool> {
     Ok(true)
 }
 
