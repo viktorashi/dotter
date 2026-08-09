@@ -10,6 +10,14 @@ type QuietType= bool;
 type DiffContextLinesType= usize;
 type VerbosityType = u8;
 
+macro_rules! merge_setting {
+    ($opt:expr, $matches:expr, $repo:expr, $global:expr, $field:ident) => {
+        if $matches.value_source(stringify!($field)) != Some(clap::parser::ValueSource::CommandLine) {
+            $opt.$field = $repo.$field.or($global.$field).unwrap_or($opt.$field);
+        }
+    };
+}
+
 /// A small dotfile manager.
 #[derive(Debug, Parser, Default, Clone)]
 #[clap(author, version, about, long_about = None)]
@@ -166,25 +174,10 @@ pub fn get_options() -> Options {
     let repo_settings = load_settings_file(std::path::Path::new("dotter.toml")).unwrap_or_default(); //not
     //sure what the default here would be tho
 
-    let from_cli = |id: &str| {
-        matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine)
-    };
-
-    if !from_cli("force") {
-        opt.force = repo_settings.force.or(global_settings.force).unwrap_or(opt.force);
-    }
-    if !from_cli("noconfirm") {
-        opt.noconfirm = repo_settings.noconfirm.or(global_settings.noconfirm).unwrap_or(opt.noconfirm);
-    }
-    if !from_cli("quiet") {
-        opt.quiet = repo_settings.quiet.or(global_settings.quiet).unwrap_or(opt.quiet);
-    }
-    if !from_cli("diff_context_lines") {
-        opt.diff_context_lines = repo_settings.diff_context_lines.or(global_settings.diff_context_lines).unwrap_or(opt.diff_context_lines);
-    }
-    if !from_cli("verbosity") {
-        opt.verbosity = repo_settings.verbosity.or(global_settings.verbosity).unwrap_or(opt.verbosity);
-    }
+    merge_setting!(opt, matches, repo_settings, global_settings, noconfirm);
+    merge_setting!(opt, matches, repo_settings, global_settings, quiet);
+    merge_setting!(opt, matches, repo_settings, global_settings, diff_context_lines);
+    merge_setting!(opt, matches, repo_settings, global_settings, verbosity);
 
     if opt.dry_run {
         opt.verbosity = std::cmp::max(opt.verbosity, 1);
