@@ -11,7 +11,7 @@ use crate::filesystem::{Filesystem, SymlinkComparison, TemplateComparison};
 
 /// A template's target must never resolve to the template's own source.
 fn check_not_self(source: &Path, target: &Path) -> Result<()> {
-    if same_file::is_same_file(source, target).unwrap_or(false) {
+    if same_file::is_same_file(source, target)? {
         anyhow::bail!(
             "target {:?} is the same file as source {:?} - refusing to deploy, as that would \
              overwrite the source. This usually means the target resolves through a symlink \
