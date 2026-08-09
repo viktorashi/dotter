@@ -1,3 +1,4 @@
+use crate::filesystem;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, CommandFactory, FromArgMatches};
@@ -146,11 +147,10 @@ pub struct DotterSettings {
 }
 
 fn load_settings_file(path: &std::path::Path) -> Option<DotterSettings> {
-    if let Ok(content) = std::fs::read_to_string(path) {
-        toml::from_str(&content).ok()
-    } else {
+    filesystem::load_file(path).unwrap_or_else(|e| {
+        log::warn!("Failed to load settings file {:?}: {:#}", path, e);
         None
-    }
+    })
 }
 
 pub fn get_options() -> Options {
