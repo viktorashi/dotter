@@ -108,7 +108,7 @@ pub struct Configuration {
 
     #[allow(dead_code)]
     pub settings: Settings,
-    
+
     pub hooks: Hooks,
 }
 
@@ -355,7 +355,7 @@ fn merge_configuration_files(
             anyhow::bail!("circular dependency detected involving package {}", pkg);
         }
         visiting.insert(pkg.to_string());
-        
+
         if let Some(package) = global_packages.get(pkg) {
             for dep in &package.depends {
                 dfs(dep, global_packages, visited, visiting, order)?;
@@ -363,7 +363,7 @@ fn merge_configuration_files(
         } else {
             anyhow::bail!("Package {} not found", pkg);
         }
-        
+
         visiting.remove(pkg);
         visited.insert(pkg.to_string());
         order.push(pkg.to_string());
@@ -371,7 +371,13 @@ fn merge_configuration_files(
     }
 
     for root in &local.packages {
-        dfs(root, &global.packages, &mut visited, &mut visiting, &mut ordered_packages)?;
+        dfs(
+            root,
+            &global.packages,
+            &mut visited,
+            &mut visiting,
+            &mut ordered_packages,
+        )?;
     }
 
     let enabled_packages = visited;
@@ -391,7 +397,11 @@ fn merge_configuration_files(
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                 let pkg_name = entry.file_name().to_string_lossy().to_string();
                 if !packages_map.contains_key(&pkg_name) {
-                    anyhow::bail!("Directory .hooks/{} exists, but package '{}' is not declared in global.toml", pkg_name, pkg_name);
+                    anyhow::bail!(
+                        "Directory .hooks/{} exists, but package '{}' is not declared in global.toml",
+                        pkg_name,
+                        pkg_name
+                    );
                 }
             }
         }
@@ -399,7 +409,7 @@ fn merge_configuration_files(
 
     // Collect hooks in topological order
     let mut config_hooks = Hooks::default();
-    
+
     fn scan_implicit_hooks(pkg: &str, hook_type: &str) -> Vec<Hook> {
         let mut implicit = Vec::new();
         let path = std::path::PathBuf::from(format!(".hooks/{}/{}", pkg, hook_type));
@@ -419,17 +429,33 @@ fn merge_configuration_files(
 
     for pkg in &ordered_packages {
         if let Some(package) = global.packages.get(pkg) {
-            config_hooks.pre_deploy.extend(scan_implicit_hooks(pkg, "pre_deploy"));
-            config_hooks.pre_deploy.extend(package.hooks.pre_deploy.clone());
+            config_hooks
+                .pre_deploy
+                .extend(scan_implicit_hooks(pkg, "pre_deploy"));
+            config_hooks
+                .pre_deploy
+                .extend(package.hooks.pre_deploy.clone());
 
-            config_hooks.post_deploy.extend(scan_implicit_hooks(pkg, "post_deploy"));
-            config_hooks.post_deploy.extend(package.hooks.post_deploy.clone());
+            config_hooks
+                .post_deploy
+                .extend(scan_implicit_hooks(pkg, "post_deploy"));
+            config_hooks
+                .post_deploy
+                .extend(package.hooks.post_deploy.clone());
 
-            config_hooks.pre_undeploy.extend(scan_implicit_hooks(pkg, "pre_undeploy"));
-            config_hooks.pre_undeploy.extend(package.hooks.pre_undeploy.clone());
+            config_hooks
+                .pre_undeploy
+                .extend(scan_implicit_hooks(pkg, "pre_undeploy"));
+            config_hooks
+                .pre_undeploy
+                .extend(package.hooks.pre_undeploy.clone());
 
-            config_hooks.post_undeploy.extend(scan_implicit_hooks(pkg, "post_undeploy"));
-            config_hooks.post_undeploy.extend(package.hooks.post_undeploy.clone());
+            config_hooks
+                .post_undeploy
+                .extend(scan_implicit_hooks(pkg, "post_undeploy"));
+            config_hooks
+                .post_undeploy
+                .extend(package.hooks.post_undeploy.clone());
         }
     }
 
