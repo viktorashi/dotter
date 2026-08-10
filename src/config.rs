@@ -977,4 +977,100 @@ mod test {
             &FileTarget::Symbolic(PathBuf::from("~/.SliverBodacious").into())
         );
     }
+
+    #[test]
+    fn hook_deserialize_file_path() {
+        #[derive(Deserialize)]
+        struct W {
+            hook: Hook,
+        }
+        let w: W = toml::from_str(r#"hook = "scripts/setup.sh""#).unwrap();
+        assert_eq!(w.hook, Hook::File(PathBuf::from("scripts/setup.sh")));
+    }
+
+    #[test]
+    fn hook_deserialize_command() {
+        #[derive(Deserialize)]
+        struct W {
+            hook: Hook,
+        }
+        let w: W = toml::from_str(r#"hook = { command = "sudo pacman -Sy" }"#).unwrap();
+        assert_eq!(
+            w.hook,
+            Hook::Command {
+                command: "sudo pacman -Sy".to_string(),
+                shell: None,
+            }
+        );
+    }
+
+    #[test]
+    fn hook_deserialize_command_with_shell() {
+        #[derive(Deserialize)]
+        struct W {
+            hook: Hook,
+        }
+        let w: W =
+            toml::from_str(r#"hook = { command = "Write-Host hi", shell = ["pwsh", "-Command"] }"#)
+                .unwrap();
+        assert_eq!(
+            w.hook,
+            Hook::Command {
+                command: "Write-Host hi".to_string(),
+                shell: Some(vec!["pwsh".to_string(), "-Command".to_string()]),
+            }
+        );
+    }
+
+    #[test]
+    fn package_with_hooks() {
+        let pkg: Package = toml::from_str(
+            r#"
+                depends = []
+
+                [hooks]
+                pre_deploy = ["scripts/pre.sh", { command = "echo hello" }]
+                post_deploy = [{ command = "brew update", shell = ["zsh", "-c"] }]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(pkg.hooks.pre_deploy.len(), 2);
+        assert_eq!(
+            pkg.hooks.pre_deploy[0],
+            Hook::File(PathBuf::from("scripts/pre.sh"))
+        );
+        assert_eq!(
+            pkg.hooks.pre_deploy[1],
+            Hook::Command {
+                command: "echo hello".to_string(),
+                shell: None,
+            }
+        );
+        assert_eq!(pkg.hooks.post_deploy.len(), 1);
+        assert_eq!(
+            pkg.hooks.post_deploy[0],
+            Hook::Command {
+                command: "brew update".to_string(),
+                shell: Some(vec!["zsh".to_string(), "-c".to_string()]),
+            }
+        );
+        assert!(pkg.hooks.pre_undeploy.is_empty());
+        assert!(pkg.hooks.post_undeploy.is_empty());
+    }
+
+    #[test]
+    fn package_without_hooks_defaults_empty() {
+        let pkg: Package = toml::from_str(
+            r#"
+                depends = []
+            "#,
+        )
+        .unwrap();
+
+        assert!(pkg.hooks.pre_deploy.is_empty());
+        assert!(pkg.hooks.post_deploy.is_empty());
+        assert!(pkg.hooks.pre_undeploy.is_empty());
+        assert!(pkg.hooks.post_undeploy.is_empty());
+    }
 }

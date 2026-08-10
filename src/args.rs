@@ -79,6 +79,10 @@ pub struct Options {
     #[clap(short, long, value_parser, global = true)]
     pub patch: bool,
 
+    /// Skip all hooks (both global and per-package)
+    #[clap(long, value_parser, global = true)]
+    pub skip_hooks: bool,
+
     /// Amount of lines that are printed before and after a diff hunk.
     #[clap(long, value_parser, default_value = "3")]
     pub diff_context_lines: usize,
