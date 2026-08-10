@@ -68,7 +68,8 @@ pub fn run_clone(input: Option<&str>) -> Result<std::path::PathBuf> {
     }
     cmd.arg(&url).arg(&temp_dir);
 
-    let status = cmd.status().context("Failed to run git clone")?;
+    use crate::CommandExt;
+    let status = cmd.status_interruptible().context("Failed to run git clone")?;
 
     if !status.success() {
         anyhow::bail!("git clone failed with status {}", status);
