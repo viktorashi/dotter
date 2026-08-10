@@ -88,25 +88,25 @@ pub struct Options {
     pub verbosity: VerbosityType,
 
     /// Quiet - only print errors
-    #[clap(short, long, value_parser, global = true)]
+    #[clap(short, long, action = clap::ArgAction::SetTrue, global = true)]
     pub quiet: QuietType,
 
     /// Force - instead of skipping, overwrite target files if their content is unexpected.
     /// Overrides --dry-run.
-    #[clap(short, long, value_parser, global = true)]
+    #[clap(short, long, action = clap::ArgAction::SetTrue, global = true)]
     pub force: ForceType,
 
     /// Assume "yes" instead of prompting when removing empty directories
-    #[clap(short = 'y', long = "noconfirm", global = true)]
+    #[clap(short = 'y', long = "noconfirm", action = clap::ArgAction::SetTrue, global = true)]
     pub noconfirm: NoConfirmType,
 
     /// Take standard input as an additional files/variables patch, added after evaluating
     /// `local.toml`. Assumes --noconfirm flag because all of stdin is taken as the patch.
-    #[clap(short, long, value_parser, global = true)]
+    #[clap(short, long, global = true)]
     pub patch: bool,
 
     /// Skip all hooks (both global and per-package)
-    #[clap(long, value_parser, global = true)]
+    #[clap(long, global = true)]
     pub skip_hooks: bool,
 
     /// Amount of lines that are printed before and after a diff hunk.
