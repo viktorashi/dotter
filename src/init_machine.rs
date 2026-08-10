@@ -38,10 +38,8 @@ pub fn setup_machine(opt: &Options, explicit: bool) -> Result<bool> {
         // We don't remove hostname.toml because they might just be switching to it.
         // Actually, if local_exists was false, they were using hostname.toml. 
         // Let's just create local.toml for the new machine which overrides hostname.toml.
-    } else {
-        if explicit {
-            println!("No machine configured yet. Let's set one up.");
-        }
+    } else if explicit {
+        println!("No machine configured yet. Let's set one up.");
     }
 
     // 1. Probe OS and distro
@@ -86,26 +84,36 @@ pub fn setup_machine(opt: &Options, explicit: bool) -> Result<bool> {
         
         let new_machine_path = machines_dir.join(format!("{}.toml", new_name));
         
-        let mut seed_options = machines.clone();
-        seed_options.push("(empty)".to_string());
-        
-        let seed = Select::new("Seed from existing machine?", seed_options)
-            .prompt()
-            .context("prompt for seed")?;
-            
         fs::create_dir_all(&machines_dir).context("create machines dir")?;
         
-        if seed != "(empty)" {
-            let seed_path = machines_dir.join(format!("{}.toml", seed));
-            fs::copy(&seed_path, &new_machine_path).context("copy seed machine")?;
-            println!("Seeded {} from {}", new_name, seed);
-        } else {
+        if machines.is_empty() {
+            // No existing machines to seed from — create empty
             let empty_machine = MachineConfig {
                 packages: Vec::new(),
                 ..Default::default()
             };
             filesystem::save_file(&new_machine_path, empty_machine).context("write empty machine")?;
             println!("Created empty machine {}", new_name);
+        } else {
+            let mut seed_options = machines.clone();
+            seed_options.push("(empty)".to_string());
+            
+            let seed = Select::new("Seed from existing machine?", seed_options)
+                .prompt()
+                .context("prompt for seed")?;
+            
+            if seed != "(empty)" {
+                let seed_path = machines_dir.join(format!("{}.toml", seed));
+                fs::copy(&seed_path, &new_machine_path).context("copy seed machine")?;
+                println!("Seeded {} from {}", new_name, seed);
+            } else {
+                let empty_machine = MachineConfig {
+                    packages: Vec::new(),
+                    ..Default::default()
+                };
+                filesystem::save_file(&new_machine_path, empty_machine).context("write empty machine")?;
+                println!("Created empty machine {}", new_name);
+            }
         }
         
         new_name
