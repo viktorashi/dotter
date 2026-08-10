@@ -38,3 +38,27 @@ Adds a `dotter.toml` settings file, as proposed by the maintainer in 2021. This 
 
 **Description:**
 Introduces `LocalConfig.machine: Option<String>` which resolves to a `.dotter/machines/<name>.toml` file. Currently, users have to maintain untracked, hand-edited `local.toml` files that often drift. By defining a machine concept, users can declare `packages` and `variables` in tracked files and just point to them. This PR guards that exactly one of `machine` or `packages` must be present.
+
+## Branch: `fix/graceful-ctrlc`
+*(You need to create an issue for this: "Gracefully handle SIGINT to prevent corrupted state")*
+
+**Description:**
+Fixes abrupt interruption during deployment. When Ctrl-C is pressed, dotter currently terminates immediately, which can leave symlinks or cache files in a broken state. This PR adds a `ctrlc` handler that sets an `AtomicBool`, allowing the current deployment action to finish gracefully before exiting.
+
+## Branch: `feat/clone-cold`
+*(You need to create an issue for this: "Support bootstrapping from remote repository via `--clone`")*
+
+**Description:**
+Adds a `--clone <url>` flag to bootstrap dotter on a cold machine. It clones the remote repository and then automatically runs deployment from the cloned directory, making setting up a new machine a seamless one-liner without having to manually `git clone` first.
+
+## Branch: `feat/init-machine`
+*(You need to create an issue for this: "Interactive machine onboarding wizard")*
+
+**Description:**
+Adds an interactive machine selection wizard. When a user runs `dotter` without a configured `local.toml`, instead of failing, dotter uses `inquire` to list available machines in `.dotter/machines/` and prompt the user. It allows selecting an existing machine, seeding a new one from an existing configuration, or creating a blank one.
+
+## Branch: `feat/per-package-hooks`
+*(You need to create an issue for this: "First-class per-package hooks with topological sorting and implicit scanning")*
+
+**Description:**
+Adds first-class support for pre/post deploy/undeploy hooks. Packages can now declare hooks in `global.toml`, and dotter implicitly scans `.hooks/<pkg>/<type>/` for scripts to run. It implements a topological sort so hooks run in the correct dependency order. Also introduces native `.ps1` support for Windows hooks, a `shell` override array, and a `--skip-hooks` flag.
