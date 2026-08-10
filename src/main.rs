@@ -16,10 +16,67 @@ mod watch;
 
 use std::fmt::Write;
 use std::io;
+use std::process::{Command, Child, ExitStatus, Output};
 
 use anyhow::{Context, Result};
 use clap::CommandFactory;
 use clap_complete::{generate, generate_to};
+
+pub static CHILD_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn setup_ctrlc() {
+    let _ = ctrlc::set_handler(move || {
+        if !CHILD_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+            std::process::exit(130);
+        } else {
+            INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    });
+}
+
+pub trait CommandExt {
+    fn status_interruptible(&mut self) -> io::Result<ExitStatus>;
+    fn output_interruptible(&mut self) -> io::Result<Output>;
+}
+
+impl CommandExt for Command {
+    fn status_interruptible(&mut self) -> io::Result<ExitStatus> {
+        CHILD_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+        let res = self.status();
+        CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+        }
+        res
+    }
+
+    fn output_interruptible(&mut self) -> io::Result<Output> {
+        CHILD_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+        let res = self.output();
+        CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+        }
+        res
+    }
+}
+
+pub trait ChildExt {
+    fn wait_interruptible(&mut self) -> io::Result<ExitStatus>;
+}
+
+impl ChildExt for Child {
+    fn wait_interruptible(&mut self) -> io::Result<ExitStatus> {
+        CHILD_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+        let res = self.wait();
+        CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+        }
+        res
+    }
+}
 
 fn main() {
     match run() {
@@ -47,6 +104,8 @@ pub(crate) fn display_error(error: anyhow::Error) {
 
 /// Returns true if program should exit with success status
 fn run() -> Result<bool> {
+    setup_ctrlc();
+
     // Parse arguments
     let opt = args::get_options();
 

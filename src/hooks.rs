@@ -58,8 +58,9 @@ pub(crate) fn run_hook(
     debug!("Running script file");
     let mut child = run_script_file(&script_file)?;
 
+    use crate::ChildExt;
     anyhow::ensure!(
-        child.wait().context("wait for child shell")?.success(),
+        child.wait_interruptible().context("wait for child shell")?.success(),
         "subshell returned error"
     );
 

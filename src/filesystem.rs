@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::config::UnixUser;
+use crate::ChildExt;
 
 // === Serialize/deserialize files ===
 
@@ -300,7 +301,7 @@ impl Filesystem for RealFilesystem {
                     .arg(path)
                     .spawn()
                     .context("spawn sudo rm command")?
-                    .wait()
+                    .wait_interruptible()
                     .context("wait for sudo rm command")?
                     .success();
 
@@ -342,7 +343,7 @@ impl Filesystem for RealFilesystem {
                             .arg(path)
                             .spawn()
                             .context("spawn sudo rmdir")?
-                            .wait()
+                            .wait_interruptible()
                             .context("wait for sudo rmdir")?
                             .success();
 
@@ -374,7 +375,7 @@ impl Filesystem for RealFilesystem {
                 .arg(link)
                 .spawn()
                 .context("spawn sudo ln")?
-                .wait()
+                .wait_interruptible()
                 .context("wait for sudo ln")?
                 .success();
 
@@ -406,7 +407,7 @@ impl Filesystem for RealFilesystem {
                 .arg(path)
                 .spawn()
                 .context("spawn sudo mkdir")?
-                .wait()
+                .wait_interruptible()
                 .context("wait for sudo mkdir")?
                 .success();
 
@@ -446,7 +447,7 @@ impl Filesystem for RealFilesystem {
                 .write_all(contents.as_bytes())
                 .context("give input to tee")?;
 
-            let success = child.wait().context("wait for sudo tee")?.success();
+            let success = child.wait_interruptible().context("wait for sudo tee")?.success();
 
             anyhow::ensure!(success, "sudo tee failed");
         } else {
@@ -477,7 +478,7 @@ impl Filesystem for RealFilesystem {
             .arg(file)
             .spawn()
             .context("spawn sudo chown command")?
-            .wait()
+            .wait_interruptible()
             .context("wait for sudo chown command")?
             .success();
 
@@ -502,7 +503,7 @@ impl Filesystem for RealFilesystem {
                 .arg(target)
                 .spawn()
                 .context("spawn sudo chmod command")?
-                .wait()
+                .wait_interruptible()
                 .context("wait for sudo chmod command")?
                 .success();
 
