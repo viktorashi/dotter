@@ -108,17 +108,47 @@ pub struct Configuration {
 
     #[allow(dead_code)]
     pub settings: Settings,
+
+    pub hooks: Hooks,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum Hook {
+    /// A table with `command` and optional `shell`: `{ command = "...", shell = ["pwsh", "-Command"] }`
+    Command {
+        command: String,
+        #[serde(default)]
+        shell: Option<Vec<String>>,
+    },
+    /// A plain string path to a script file
+    File(std::path::PathBuf),
+}
+
+#[derive(Debug, Deserialize, Serialize, Default, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Hooks {
+    #[serde(default)]
+    pub pre_deploy: Vec<Hook>,
+    #[serde(default)]
+    pub post_deploy: Vec<Hook>,
+    #[serde(default)]
+    pub pre_undeploy: Vec<Hook>,
+    #[serde(default)]
+    pub post_undeploy: Vec<Hook>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Package {
     #[serde(default)]
-    depends: Vec<String>,
+    pub depends: Vec<String>,
     #[serde(default)]
-    files: Files,
+    pub files: Files,
     #[serde(default)]
-    variables: Variables,
+    pub variables: Variables,
+    #[serde(default)]
+    pub hooks: Hooks,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -222,6 +252,7 @@ pub fn save_dummy_config(
         files: files.into_iter().map(|f| (f.into(), "".into())).collect(),
         variables: Variables::new(),
         depends: vec![],
+        hooks: Hooks::default(),
     };
     trace!("Default package: {:#?}", package);
 
@@ -311,35 +342,128 @@ fn merge_configuration_files(
         .with_context(|| format!("including file {included_path:?}"))?;
     }
 
-    // Enable depended packages
-    let mut enabled_packages = local.packages.clone().into_iter().collect::<BTreeSet<_>>();
-    let mut package_count = 0;
+    // Enable depended packages using topological sort
+    let mut visited = BTreeSet::new();
+    let mut visiting = BTreeSet::new();
+    let mut ordered_packages = Vec::new();
 
-    // Keep iterating until there's nothing new added
-    while enabled_packages.len() > package_count {
-        let mut new_packages = BTreeSet::new();
-        for package in &enabled_packages {
-            new_packages.extend(
-                global
-                    .packages
-                    .get(package)
-                    .with_context(|| format!("get info of package {package}"))?
-                    .depends
-                    .clone(),
-            );
+    fn dfs(
+        pkg: &str,
+        global_packages: &BTreeMap<String, Package>,
+        visited: &mut BTreeSet<String>,
+        visiting: &mut BTreeSet<String>,
+        order: &mut Vec<String>,
+    ) -> Result<()> {
+        if visited.contains(pkg) {
+            return Ok(());
         }
-        package_count = enabled_packages.len();
-        enabled_packages.extend(new_packages);
+        if visiting.contains(pkg) {
+            anyhow::bail!("circular dependency detected involving package {}", pkg);
+        }
+        visiting.insert(pkg.to_string());
+
+        if let Some(package) = global_packages.get(pkg) {
+            for dep in &package.depends {
+                dfs(dep, global_packages, visited, visiting, order)?;
+            }
+        } else {
+            anyhow::bail!("Package {} not found", pkg);
+        }
+
+        visiting.remove(pkg);
+        visited.insert(pkg.to_string());
+        order.push(pkg.to_string());
+        Ok(())
     }
+
+    for root in &local.packages {
+        dfs(
+            root,
+            &global.packages,
+            &mut visited,
+            &mut visiting,
+            &mut ordered_packages,
+        )?;
+    }
+
+    let enabled_packages = visited;
 
     let packages_map = global
         .packages
         .keys()
         .map(|k| (k.to_string(), enabled_packages.contains(k)))
-        .collect();
+        .collect::<BTreeMap<_, _>>();
 
     // Apply packages filter
     global.packages.retain(|k, _| enabled_packages.contains(k));
+
+    // Validate .hooks/ directory: error on orphan directories
+    if let Ok(hooks_dir) = std::fs::read_dir(".hooks") {
+        for entry in hooks_dir.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let pkg_name = entry.file_name().to_string_lossy().to_string();
+                if !packages_map.contains_key(&pkg_name) {
+                    anyhow::bail!(
+                        "Directory .hooks/{} exists, but package '{}' is not declared in global.toml",
+                        pkg_name,
+                        pkg_name
+                    );
+                }
+            }
+        }
+    }
+
+    // Collect hooks in topological order (implicit from .hooks/ first, then explicit from TOML)
+    let mut config_hooks = Hooks::default();
+
+    fn scan_implicit_hooks(pkg: &str, hook_type: &str) -> Vec<Hook> {
+        let mut implicit = Vec::new();
+        let path = std::path::PathBuf::from(format!(".hooks/{}/{}", pkg, hook_type));
+        if path.exists() && path.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(path) {
+                let mut files = entries
+                    .flatten()
+                    .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                    .map(|e| e.path())
+                    .collect::<Vec<_>>();
+                files.sort();
+                implicit.extend(files.into_iter().map(Hook::File));
+            }
+        }
+        implicit
+    }
+
+    for pkg in &ordered_packages {
+        if let Some(package) = global.packages.get(pkg) {
+            config_hooks
+                .pre_deploy
+                .extend(scan_implicit_hooks(pkg, "pre_deploy"));
+            config_hooks
+                .pre_deploy
+                .extend(package.hooks.pre_deploy.clone());
+
+            config_hooks
+                .post_deploy
+                .extend(scan_implicit_hooks(pkg, "post_deploy"));
+            config_hooks
+                .post_deploy
+                .extend(package.hooks.post_deploy.clone());
+
+            config_hooks
+                .pre_undeploy
+                .extend(scan_implicit_hooks(pkg, "pre_undeploy"));
+            config_hooks
+                .pre_undeploy
+                .extend(package.hooks.pre_undeploy.clone());
+
+            config_hooks
+                .post_undeploy
+                .extend(scan_implicit_hooks(pkg, "post_undeploy"));
+            config_hooks
+                .post_undeploy
+                .extend(package.hooks.post_undeploy.clone());
+        }
+    }
 
     let mut output = Configuration {
         #[cfg(feature = "scripting")]
@@ -349,6 +473,7 @@ fn merge_configuration_files(
         packages: packages_map,
         recurse: true,
         settings: Settings::default(),
+        hooks: config_hooks,
     };
 
     // Merge all the packages
@@ -851,5 +976,101 @@ mod test {
             sliver,
             &FileTarget::Symbolic(PathBuf::from("~/.SliverBodacious").into())
         );
+    }
+
+    #[test]
+    fn hook_deserialize_file_path() {
+        #[derive(Deserialize)]
+        struct W {
+            hook: Hook,
+        }
+        let w: W = toml::from_str(r#"hook = "scripts/setup.sh""#).unwrap();
+        assert_eq!(w.hook, Hook::File(PathBuf::from("scripts/setup.sh")));
+    }
+
+    #[test]
+    fn hook_deserialize_command() {
+        #[derive(Deserialize)]
+        struct W {
+            hook: Hook,
+        }
+        let w: W = toml::from_str(r#"hook = { command = "sudo pacman -Sy" }"#).unwrap();
+        assert_eq!(
+            w.hook,
+            Hook::Command {
+                command: "sudo pacman -Sy".to_string(),
+                shell: None,
+            }
+        );
+    }
+
+    #[test]
+    fn hook_deserialize_command_with_shell() {
+        #[derive(Deserialize)]
+        struct W {
+            hook: Hook,
+        }
+        let w: W =
+            toml::from_str(r#"hook = { command = "Write-Host hi", shell = ["pwsh", "-Command"] }"#)
+                .unwrap();
+        assert_eq!(
+            w.hook,
+            Hook::Command {
+                command: "Write-Host hi".to_string(),
+                shell: Some(vec!["pwsh".to_string(), "-Command".to_string()]),
+            }
+        );
+    }
+
+    #[test]
+    fn package_with_hooks() {
+        let pkg: Package = toml::from_str(
+            r#"
+                depends = []
+
+                [hooks]
+                pre_deploy = ["scripts/pre.sh", { command = "echo hello" }]
+                post_deploy = [{ command = "brew update", shell = ["zsh", "-c"] }]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(pkg.hooks.pre_deploy.len(), 2);
+        assert_eq!(
+            pkg.hooks.pre_deploy[0],
+            Hook::File(PathBuf::from("scripts/pre.sh"))
+        );
+        assert_eq!(
+            pkg.hooks.pre_deploy[1],
+            Hook::Command {
+                command: "echo hello".to_string(),
+                shell: None,
+            }
+        );
+        assert_eq!(pkg.hooks.post_deploy.len(), 1);
+        assert_eq!(
+            pkg.hooks.post_deploy[0],
+            Hook::Command {
+                command: "brew update".to_string(),
+                shell: Some(vec!["zsh".to_string(), "-c".to_string()]),
+            }
+        );
+        assert!(pkg.hooks.pre_undeploy.is_empty());
+        assert!(pkg.hooks.post_undeploy.is_empty());
+    }
+
+    #[test]
+    fn package_without_hooks_defaults_empty() {
+        let pkg: Package = toml::from_str(
+            r#"
+                depends = []
+            "#,
+        )
+        .unwrap();
+
+        assert!(pkg.hooks.pre_deploy.is_empty());
+        assert!(pkg.hooks.post_deploy.is_empty());
+        assert!(pkg.hooks.pre_undeploy.is_empty());
+        assert!(pkg.hooks.post_undeploy.is_empty());
     }
 }

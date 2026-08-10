@@ -41,15 +41,29 @@ pub fn deploy(opt: &Options) -> Result<bool> {
 
     let handlebars = create_new_handlebars(&mut config).context("initialize handlebars")?;
 
-    debug!("Running pre-deploy hook");
-    if !opt.dry_run {
+    if opt.skip_hooks {
+        warn!("Skipping all pre-deploy hooks (--skip-hooks)");
+    } else if opt.dry_run {
+        if opt.pre_deploy.exists() {
+            info!("Would run global pre-deploy hook: {:?}", opt.pre_deploy);
+        }
+        for hook in &config.hooks.pre_deploy {
+            info!("Would run package pre-deploy hook: {:?}", hook);
+        }
+    } else {
+        debug!("Running pre-deploy hooks");
         hooks::run_hook(
             &opt.pre_deploy,
             &opt.cache_directory,
             &handlebars,
             &config.variables,
         )
-        .context("run pre-deploy hook")?;
+        .context("run global pre-deploy hook")?;
+
+        for hook in &config.hooks.pre_deploy {
+            hooks::run_package_hook(hook, &opt.cache_directory, &handlebars, &config.variables)
+                .context("run package pre-deploy hook")?;
+        }
     }
 
     let (mut real_fs, mut dry_run_fs);
@@ -145,15 +159,29 @@ Proceeding by copying instead of symlinking."
         filesystem::save_file(&opt.cache_file, cache).context("save cache")?;
     }
 
-    debug!("Running post-deploy hook");
-    if !opt.dry_run {
+    if opt.skip_hooks {
+        warn!("Skipping all post-deploy hooks (--skip-hooks)");
+    } else if opt.dry_run {
+        for hook in &config.hooks.post_deploy {
+            info!("Would run package post-deploy hook: {:?}", hook);
+        }
+        if opt.post_deploy.exists() {
+            info!("Would run global post-deploy hook: {:?}", opt.post_deploy);
+        }
+    } else {
+        debug!("Running post-deploy hooks");
+        for hook in &config.hooks.post_deploy {
+            hooks::run_package_hook(hook, &opt.cache_directory, &handlebars, &config.variables)
+                .context("run package post-deploy hook")?;
+        }
+
         hooks::run_hook(
             &opt.post_deploy,
             &opt.cache_directory,
             &handlebars,
             &config.variables,
         )
-        .context("run post-deploy hook")?;
+        .context("run global post-deploy hook")?;
     }
 
     Ok(error_occurred)
@@ -171,15 +199,29 @@ pub fn undeploy(opt: &Options) -> Result<bool> {
 
     // === Pre-undeploy ===
 
-    debug!("Running pre-undeploy hook");
-    if !opt.dry_run {
+    if opt.skip_hooks {
+        warn!("Skipping all pre-undeploy hooks (--skip-hooks)");
+    } else if opt.dry_run {
+        if opt.pre_undeploy.exists() {
+            info!("Would run global pre-undeploy hook: {:?}", opt.pre_undeploy);
+        }
+        for hook in &config.hooks.pre_undeploy {
+            info!("Would run package pre-undeploy hook: {:?}", hook);
+        }
+    } else {
+        debug!("Running pre-undeploy hooks");
         hooks::run_hook(
             &opt.pre_undeploy,
             &opt.cache_directory,
             &handlebars,
             &config.variables,
         )
-        .context("run pre-undeploy hook")?;
+        .context("run global pre-undeploy hook")?;
+
+        for hook in &config.hooks.pre_undeploy {
+            hooks::run_package_hook(hook, &opt.cache_directory, &handlebars, &config.variables)
+                .context("run package pre-undeploy hook")?;
+        }
     }
 
     let mut suggest_force = false;
@@ -237,15 +279,32 @@ pub fn undeploy(opt: &Options) -> Result<bool> {
         filesystem::save_file(&opt.cache_file, cache).context("save cache")?;
     }
 
-    debug!("Running post-undeploy hook");
-    if !opt.dry_run {
+    if opt.skip_hooks {
+        warn!("Skipping all post-undeploy hooks (--skip-hooks)");
+    } else if opt.dry_run {
+        for hook in &config.hooks.post_undeploy {
+            info!("Would run package post-undeploy hook: {:?}", hook);
+        }
+        if opt.post_undeploy.exists() {
+            info!(
+                "Would run global post-undeploy hook: {:?}",
+                opt.post_undeploy
+            );
+        }
+    } else {
+        debug!("Running post-undeploy hooks");
+        for hook in &config.hooks.post_undeploy {
+            hooks::run_package_hook(hook, &opt.cache_directory, &handlebars, &config.variables)
+                .context("run package post-undeploy hook")?;
+        }
+
         hooks::run_hook(
             &opt.post_undeploy,
             &opt.cache_directory,
             &handlebars,
             &config.variables,
         )
-        .context("run post-undeploy hook")?;
+        .context("run global post-undeploy hook")?;
     }
 
     Ok(error_occurred)
