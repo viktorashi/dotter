@@ -13,18 +13,23 @@ pub(crate) fn run_hook(
     handlebars: &Handlebars<'_>,
     variables: &crate::config::Variables,
 ) -> Result<()> {
-    let bat_sibling = if cfg!(windows) && location.extension().is_some_and(|e| e == "sh") {
-        let candidate = location.with_extension("bat");
-        if candidate.exists() {
-            debug!("Using hook file {:?} on windows", candidate);
-            Some(candidate)
+    let win_sibling = if cfg!(windows) && location.extension().is_some_and(|e| e == "sh") {
+        // Prefer .ps1 over .bat on Windows
+        let ps1_candidate = location.with_extension("ps1");
+        let bat_candidate = location.with_extension("bat");
+        if ps1_candidate.exists() {
+            debug!("Using hook file {:?} on windows", ps1_candidate);
+            Some(ps1_candidate)
+        } else if bat_candidate.exists() {
+            debug!("Using hook file {:?} on windows", bat_candidate);
+            Some(bat_candidate)
         } else {
             None
         }
     } else {
         None
     };
-    let location: &Path = bat_sibling.as_deref().unwrap_or(location);
+    let location: &Path = win_sibling.as_deref().unwrap_or(location);
 
     if !location.exists() {
         debug!("Hook file at {:?} missing", location);
@@ -32,7 +37,7 @@ pub(crate) fn run_hook(
     }
 
     let mut script_file = cache_dir.join(location);
-    if cfg!(windows) {
+    if cfg!(windows) && location.extension().is_none_or(|e| e != "ps1") {
         script_file.set_extension("bat");
     }
 
@@ -68,9 +73,17 @@ pub(crate) fn run_package_hook(
     variables: &crate::config::Variables,
 ) -> Result<()> {
     match hook {
-        crate::config::Hook::Command { command } => {
+        crate::config::Hook::Command { command, shell } => {
             debug!("Running command: {}", command);
-            let mut child = if cfg!(windows) {
+            let mut child = if let Some(shell_args) = shell {
+                anyhow::ensure!(!shell_args.is_empty(), "hook shell array must not be empty");
+                let (program, prefix_args) = shell_args.split_first().unwrap();
+                Command::new(program)
+                    .args(prefix_args)
+                    .arg(command)
+                    .spawn()
+                    .with_context(|| format!("spawn custom shell {:?}", program))?
+            } else if cfg!(windows) {
                 Command::new("cmd")
                     .args(["/C", command])
                     .spawn()
@@ -108,5 +121,13 @@ fn run_script_file(script: &Path) -> Result<Child> {
 
 #[cfg(windows)]
 fn run_script_file(script: &Path) -> Result<Child> {
-    Command::new(script).spawn().context("spawn batch file")
+    if script.extension().is_some_and(|e| e == "ps1") {
+        Command::new("powershell")
+            .args(["-ExecutionPolicy", "Bypass", "-File"])
+            .arg(script)
+            .spawn()
+            .context("spawn powershell")
+    } else {
+        Command::new(script).spawn().context("spawn batch file")
+    }
 }
