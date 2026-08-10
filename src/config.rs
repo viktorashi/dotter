@@ -134,30 +134,30 @@ struct GlobalConfig {
 
 type IncludedConfig = BTreeMap<String, Package>;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
-struct MachineConfig {
+pub struct MachineConfig {
     #[serde(default)]
-    packages: Vec<String>,
+    pub packages: Vec<String>,
     #[serde(default)]
     // for one-off files
-    files: Files,
+    pub files: Files,
     #[serde(default)]
     // for machine-specific single-value variables
-    variables: Variables,
+    pub variables: Variables,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
-struct LocalConfig {
+pub struct LocalConfig {
     #[serde(default)]
-    includes: Vec<PathBuf>,
-    packages: Option<Vec<String>>,
-    machine: Option<String>,
+    pub includes: Vec<PathBuf>,
+    pub packages: Option<Vec<String>>,
+    pub machine: Option<String>,
     #[serde(default)]
-    files: Files,
+    pub files: Files,
     #[serde(default)]
-    variables: Variables,
+    pub variables: Variables,
 }
 
 pub fn load_configuration(
