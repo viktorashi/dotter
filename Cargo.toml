@@ -34,6 +34,9 @@ watchexec-filterer-globset = { version = "8", optional = true }
 dirs = "4.0.0"
 inquire = { version = "0.9", features = ["fuzzy"] }
 ctrlc = "3.5.2"
+inquire = { version = "0.9", features = ["fuzzy"] }
+whoami = "2.1.2"
+dirs = "4.0.0"
 
 [features]
 default = ["scripting", "watch"]
