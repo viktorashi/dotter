@@ -180,12 +180,13 @@ fn command_success_helper(
         .into());
     }
 
+    use crate::CommandExt;
     let status = os_shell()
         .arg(&command)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()?
+        .status_interruptible()?
         .success();
     if status {
         out.write("true")?;
@@ -217,12 +218,13 @@ fn command_output_helper(
         .into());
     }
 
+    use crate::CommandExt;
     let output = os_shell()
         .arg(&command)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         // .stderr(Stdio::piped()) - probably not wanted
-        .output()?;
+        .output_interruptible()?;
     out.write(&String::from_utf8_lossy(&output.stdout))?;
     // writing anything other than an empty string is considered truthy
 
@@ -237,24 +239,26 @@ fn is_executable(name: &str) -> Result<bool> {
         format!("{}.exe", name)
     };
 
+    use crate::CommandExt;
     Command::new("where")
         .arg(name)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .status_interruptible()
         .map(|s| s.success())
         .context("run `where` command")
 }
 
 #[cfg(unix)]
 fn is_executable(name: &str) -> Result<bool> {
+    use crate::CommandExt;
     Command::new("which")
         .arg(name)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .status_interruptible()
         .map(|s| s.success())
         .context("run `which` command")
 }
