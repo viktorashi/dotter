@@ -49,7 +49,12 @@ pub fn deploy(opt: &Options) -> Result<bool> {
             &handlebars,
             &config.variables,
         )
-        .context("run pre-deploy hook")?;
+        .context("run global pre-deploy hook")?;
+
+        for hook in &config.hooks.pre_deploy {
+            hooks::run_package_hook(hook, &opt.cache_directory, &handlebars, &config.variables)
+                .context("run package pre-deploy hook")?;
+        }
     }
 
     let (mut real_fs, mut dry_run_fs);
@@ -147,13 +152,18 @@ Proceeding by copying instead of symlinking."
 
     debug!("Running post-deploy hook");
     if !opt.dry_run {
+        for hook in &config.hooks.post_deploy {
+            hooks::run_package_hook(hook, &opt.cache_directory, &handlebars, &config.variables)
+                .context("run package post-deploy hook")?;
+        }
+
         hooks::run_hook(
             &opt.post_deploy,
             &opt.cache_directory,
             &handlebars,
             &config.variables,
         )
-        .context("run post-deploy hook")?;
+        .context("run global post-deploy hook")?;
     }
 
     Ok(error_occurred)
@@ -179,7 +189,12 @@ pub fn undeploy(opt: &Options) -> Result<bool> {
             &handlebars,
             &config.variables,
         )
-        .context("run pre-undeploy hook")?;
+        .context("run global pre-undeploy hook")?;
+
+        for hook in &config.hooks.pre_undeploy {
+            hooks::run_package_hook(hook, &opt.cache_directory, &handlebars, &config.variables)
+                .context("run package pre-undeploy hook")?;
+        }
     }
 
     let mut suggest_force = false;
@@ -239,13 +254,18 @@ pub fn undeploy(opt: &Options) -> Result<bool> {
 
     debug!("Running post-undeploy hook");
     if !opt.dry_run {
+        for hook in &config.hooks.post_undeploy {
+            hooks::run_package_hook(hook, &opt.cache_directory, &handlebars, &config.variables)
+                .context("run package post-undeploy hook")?;
+        }
+
         hooks::run_hook(
             &opt.post_undeploy,
             &opt.cache_directory,
             &handlebars,
             &config.variables,
         )
-        .context("run post-undeploy hook")?;
+        .context("run global post-undeploy hook")?;
     }
 
     Ok(error_occurred)
