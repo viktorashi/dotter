@@ -19,7 +19,10 @@ pub struct Options {
 
     /// Clone a dotfiles repository before deploying.
     /// Without a value, clones https://github.com/<whoami>/dotfiles.git.
-    /// Can also take <user>, <user>/<repo>, or a full URL.
+    /// Can also take <user>, <user>/<repo>, a full URL, or any of those
+    /// followed by `:<branch>` to clone a specific branch
+    /// (e.g. `supercuber:dev`, `supercuber/dotfiles:main`,
+    /// `https://github.com/foo/bar.git:nightly`).
     #[clap(long, num_args = 0..=1, default_missing_value = "")]
     pub clone: Option<String>,
 

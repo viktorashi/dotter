@@ -1,6 +1,28 @@
 use anyhow::{Context, Result};
 use std::process::Command;
 
+/// Splits an input string of the form `<repo>[:<branch>]` into its parts.
+///
+/// Handles the SSH edge-case: `git@github.com:user/repo.git` has exactly one
+/// `:` that is part of the URL itself, not a branch separator. We detect this
+/// by checking for `@` + a single colon.
+fn parse_clone_input(input: &str) -> (&str, Option<&str>) {
+    // Bare SSH URL (git@host:user/repo.git) — single colon belongs to the URL.
+    if input.contains('@') && input.matches(':').count() == 1 {
+        return (input, None);
+    }
+
+    if let Some(idx) = input.rfind(':') {
+        let branch = &input[idx + 1..];
+        // If the suffix starts with `//` we've landed on the `https:` colon.
+        if !branch.is_empty() && !branch.starts_with("//") {
+            return (&input[..idx], Some(branch));
+        }
+    }
+
+    (input, None)
+}
+
 pub fn get_clone_url(input: Option<&str>) -> Result<String> {
     let input = match input {
         Some(s) if !s.is_empty() => s,
@@ -23,8 +45,15 @@ pub fn get_clone_url(input: Option<&str>) -> Result<String> {
 }
 
 pub fn run_clone(input: Option<&str>) -> Result<std::path::PathBuf> {
-    let url = get_clone_url(input)?;
-    println!("Cloning {}...", url);
+    let (repo_part, branch) = match input {
+        Some(s) => parse_clone_input(s),
+        None => ("", None),
+    };
+    let url = get_clone_url(if repo_part.is_empty() { None } else { Some(repo_part) })?;
+    match branch {
+        Some(b) => println!("Cloning {} (branch: {})...", url, b),
+        None => println!("Cloning {}...", url),
+    }
 
     // Create a temporary directory
     let temp_dir = std::env::temp_dir().join(format!("dotter_clone_{}", std::process::id()));
@@ -32,12 +61,14 @@ pub fn run_clone(input: Option<&str>) -> Result<std::path::PathBuf> {
         std::fs::remove_dir_all(&temp_dir).context("remove existing temp clone dir")?;
     }
 
-    let status = Command::new("git")
-        .arg("clone")
-        .arg(&url)
-        .arg(&temp_dir)
-        .status()
-        .context("Failed to run git clone")?;
+    let mut cmd = Command::new("git");
+    cmd.arg("clone");
+    if let Some(b) = branch {
+        cmd.arg("-b").arg(b);
+    }
+    cmd.arg(&url).arg(&temp_dir);
+
+    let status = cmd.status().context("Failed to run git clone")?;
 
     if !status.success() {
         anyhow::bail!("git clone failed with status {}", status);
