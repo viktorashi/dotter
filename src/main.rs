@@ -152,24 +152,15 @@ Otherwise, run `dotter undeploy` as root, remove cache.toml and cache/ folders, 
     }
 
     if let Some(clone_url) = &opt.clone {
-        // Run the cloning logic
         clone::run_clone(if clone_url.is_empty() { None } else { Some(clone_url) })
             .context("clone repository")?;
-        
-        // Since we changed current directory, we should probably recreate `opt`?
-        // Actually, opt is already parsed, but dotter.toml is read before this.
-        // Wait, if dotter.toml was in the cloned repo, the args parser missed it.
-        // But for `init-machine` and `deploy`, `local.toml` and `global.toml` are resolved relatively.
-        // If they are relative, they will use the new current directory!
-        // So keeping `opt` is fine, as long as `global_config` and `local_config` are relative.
-        // We'll trust they are relative defaults.
+        // run_clone sets the current directory to the cloned repo,
+        // so relative config paths (the default) will resolve from there.
     }
 
     let action = opt.action.clone().unwrap_or_default();
 
     if matches!(action, args::Action::Deploy) {
-        #[cfg(feature = "watch")]
-        let _ = ();
         // We intercept Deploy to run init-machine implicitly if needed
         init_machine::setup_machine(&opt, false)?;
     }

@@ -109,3 +109,107 @@ pub fn run_clone(input: Option<&str>) -> Result<std::path::PathBuf> {
 
     Ok(target_dir)
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_plain_username() {
+        assert_eq!(parse_clone_input("supercuber"), ("supercuber", None));
+    }
+
+    #[test]
+    fn parse_username_with_branch() {
+        assert_eq!(
+            parse_clone_input("supercuber:dev"),
+            ("supercuber", Some("dev"))
+        );
+    }
+
+    #[test]
+    fn parse_user_repo() {
+        assert_eq!(
+            parse_clone_input("supercuber/dotfiles"),
+            ("supercuber/dotfiles", None)
+        );
+    }
+
+    #[test]
+    fn parse_user_repo_with_branch() {
+        assert_eq!(
+            parse_clone_input("supercuber/dotfiles:main"),
+            ("supercuber/dotfiles", Some("main"))
+        );
+    }
+
+    #[test]
+    fn parse_https_url_no_branch() {
+        assert_eq!(
+            parse_clone_input("https://github.com/user/repo.git"),
+            ("https://github.com/user/repo.git", None)
+        );
+    }
+
+    #[test]
+    fn parse_https_url_with_branch() {
+        assert_eq!(
+            parse_clone_input("https://github.com/user/repo.git:nightly"),
+            ("https://github.com/user/repo.git", Some("nightly"))
+        );
+    }
+
+    #[test]
+    fn parse_ssh_url_no_branch() {
+        // The single colon belongs to the SSH URL — no branch.
+        assert_eq!(
+            parse_clone_input("git@github.com:user/repo.git"),
+            ("git@github.com:user/repo.git", None)
+        );
+    }
+
+    #[test]
+    fn parse_ssh_url_with_branch() {
+        // Two colons: first belongs to SSH, second separates branch.
+        assert_eq!(
+            parse_clone_input("git@github.com:user/repo.git:nightly"),
+            ("git@github.com:user/repo.git", Some("nightly"))
+        );
+    }
+
+    #[test]
+    fn parse_branch_with_slashes() {
+        assert_eq!(
+            parse_clone_input("supercuber:feat/new-machine"),
+            ("supercuber", Some("feat/new-machine"))
+        );
+    }
+
+    #[test]
+    fn url_from_username() {
+        assert_eq!(
+            get_clone_url(Some("supercuber")).unwrap(),
+            "https://github.com/supercuber/dotfiles.git"
+        );
+    }
+
+    #[test]
+    fn url_from_user_repo() {
+        assert_eq!(
+            get_clone_url(Some("supercuber/configs")).unwrap(),
+            "https://github.com/supercuber/configs.git"
+        );
+    }
+
+    #[test]
+    fn url_passthrough_https() {
+        let url = "https://gitlab.com/me/dots.git";
+        assert_eq!(get_clone_url(Some(url)).unwrap(), url);
+    }
+
+    #[test]
+    fn url_passthrough_ssh() {
+        let url = "git@github.com:user/repo.git";
+        assert_eq!(get_clone_url(Some(url)).unwrap(), url);
+    }
+}
