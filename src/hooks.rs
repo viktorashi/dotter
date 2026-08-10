@@ -71,9 +71,15 @@ pub(crate) fn run_package_hook(
         crate::config::Hook::Command { command } => {
             debug!("Running command: {}", command);
             let mut child = if cfg!(windows) {
-                Command::new("cmd").args(["/C", command]).spawn().context("spawn cmd")?
+                Command::new("cmd")
+                    .args(["/C", command])
+                    .spawn()
+                    .context("spawn cmd")?
             } else {
-                Command::new("sh").args(["-c", command]).spawn().context("spawn sh")?
+                Command::new("sh")
+                    .args(["-c", command])
+                    .spawn()
+                    .context("spawn sh")?
             };
             anyhow::ensure!(
                 child.wait().context("wait for hook command")?.success(),
@@ -81,9 +87,7 @@ pub(crate) fn run_package_hook(
             );
             Ok(())
         }
-        crate::config::Hook::File(location) => {
-            run_hook(location, cache_dir, handlebars, variables)
-        }
+        crate::config::Hook::File(location) => run_hook(location, cache_dir, handlebars, variables),
     }
 }
 
