@@ -115,7 +115,13 @@ pub struct Configuration {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Hook {
-    Command { command: String },
+    /// A table with `command` and optional `shell`: `{ command = "...", shell = ["pwsh", "-Command"] }`
+    Command {
+        command: String,
+        #[serde(default)]
+        shell: Option<Vec<String>>,
+    },
+    /// A plain string path to a script file
     File(std::path::PathBuf),
 }
 
@@ -391,7 +397,7 @@ fn merge_configuration_files(
     // Apply packages filter
     global.packages.retain(|k, _| enabled_packages.contains(k));
 
-    // Validate .hooks/ directory
+    // Validate .hooks/ directory: error on orphan directories
     if let Ok(hooks_dir) = std::fs::read_dir(".hooks") {
         for entry in hooks_dir.flatten() {
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
@@ -407,7 +413,7 @@ fn merge_configuration_files(
         }
     }
 
-    // Collect hooks in topological order
+    // Collect hooks in topological order (implicit from .hooks/ first, then explicit from TOML)
     let mut config_hooks = Hooks::default();
 
     fn scan_implicit_hooks(pkg: &str, hook_type: &str) -> Vec<Hook> {
