@@ -10,6 +10,7 @@ mod filesystem;
 mod handlebars_helpers;
 mod hooks;
 mod init;
+mod init_machine;
 #[cfg(feature = "watch")]
 mod watch;
 
@@ -149,13 +150,31 @@ Otherwise, run `dotter undeploy` as root, remove cache.toml and cache/ folders, 
         }
     }
 
-    match opt.action.clone().unwrap_or_default() {
+    let action = opt.action.clone().unwrap_or_default();
+
+    if matches!(action, args::Action::Deploy) {
+        #[cfg(feature = "watch")]
+        let _ = ();
+        // We intercept Deploy to run init-machine implicitly if needed
+        init_machine::setup_machine(&opt, false)?;
+    }
+
+    #[cfg(feature = "watch")]
+    if matches!(action, args::Action::Watch) {
+        init_machine::setup_machine(&opt, false)?;
+    }
+
+    match action {
         args::Action::Deploy => {
             debug!("Deploying...");
             if deploy::deploy(&opt).context("deploy")? {
                 // An error occurred
                 return Ok(false);
             }
+        }
+        args::Action::InitMachine => {
+            debug!("Interactively initializing machine...");
+            init_machine::setup_machine(&opt, true).context("initialize machine")?;
         }
         args::Action::Undeploy => {
             debug!("Un-Deploying...");

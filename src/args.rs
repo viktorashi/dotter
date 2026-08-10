@@ -101,6 +101,9 @@ pub enum Action {
     /// directory pointing to a dummy value and a local.toml that selects that package.
     Init,
 
+    /// Interactively select a machine profile, creating one if necessary.
+    InitMachine,
+
     /// Run continuously, watching the repository for changes and deploying as soon as they
     /// happen. Can be ran with `--dry-run`
     #[cfg(feature = "watch")]
