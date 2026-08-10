@@ -32,6 +32,8 @@ watchexec-events = { version = "6.0.0", optional = true }
 watchexec-filterer-globset = { version = "8", optional = true }
 ctrlc = "3.5.2"
 inquire = { version = "0.9", features = ["fuzzy"] }
+whoami = "2.1.2"
+dirs = "4.0.0"
 
 [features]
 default = ["scripting", "watch"]

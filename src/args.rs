@@ -17,6 +17,12 @@ pub struct Options {
     )]
     pub global_config: PathBuf,
 
+    /// Clone a dotfiles repository before deploying.
+    /// Without a value, clones https://github.com/<whoami>/dotfiles.git.
+    /// Can also take <user>, <user>/<repo>, or a full URL.
+    #[clap(long, num_args = 0..=1, default_missing_value = "")]
+    pub clone: Option<String>,
+
     /// Location of the local configuration
     #[clap(
         short,
