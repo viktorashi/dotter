@@ -62,6 +62,36 @@ pub(crate) fn run_hook(
     Ok(())
 }
 
+pub(crate) fn run_package_hook(
+    hook: &crate::config::Hook,
+    cache_dir: &Path,
+    handlebars: &Handlebars<'_>,
+    variables: &crate::config::Variables,
+) -> Result<()> {
+    match hook {
+        crate::config::Hook::Command { command } => {
+            debug!("Running command: {}", command);
+            let mut child = if cfg!(windows) {
+                Command::new("cmd")
+                    .args(["/C", command])
+                    .spawn()
+                    .context("spawn cmd")?
+            } else {
+                Command::new("sh")
+                    .args(["-c", command])
+                    .spawn()
+                    .context("spawn sh")?
+            };
+            anyhow::ensure!(
+                child.wait().context("wait for hook command")?.success(),
+                "hook command returned error"
+            );
+            Ok(())
+        }
+        crate::config::Hook::File(location) => run_hook(location, cache_dir, handlebars, variables),
+    }
+}
+
 #[cfg(unix)]
 fn run_script_file(script: &Path) -> Result<Child> {
     use std::os::unix::fs::PermissionsExt;
