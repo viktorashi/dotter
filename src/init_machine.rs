@@ -76,6 +76,7 @@ pub fn setup_machine(opt: &Options, explicit: bool) -> Result<bool> {
     options.push(CREATE_NEW.to_string());
 
     let selection = Select::new("Which machine is this? (type to filter)", options)
+        .with_vim_mode(true)
         .prompt()
         .context("prompt for machine selection")?;
 
@@ -90,6 +91,7 @@ pub fn setup_machine(opt: &Options, explicit: bool) -> Result<bool> {
         seed_options.push("(empty)".to_string());
         
         let seed = Select::new("Seed from existing machine?", seed_options)
+            .with_vim_mode(true)
             .prompt()
             .context("prompt for seed")?;
             
