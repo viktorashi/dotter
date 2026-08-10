@@ -33,7 +33,9 @@ pub fn run_clone(input: Option<&str>) -> Result<std::path::PathBuf> {
     }
 
     let status = Command::new("git")
-        .args(["clone", &url, temp_dir.to_str().unwrap()])
+        .arg("clone")
+        .arg(&url)
+        .arg(&temp_dir)
         .status()
         .context("Failed to run git clone")?;
 
