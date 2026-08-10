@@ -17,7 +17,7 @@ mod watch;
 
 use std::fmt::Write;
 use std::io;
-use std::process::{Command, Child, ExitStatus, Output};
+use std::process::{Child, Command, ExitStatus, Output};
 
 use anyhow::{Context, Result};
 use clap::CommandFactory;
@@ -47,7 +47,10 @@ impl CommandExt for Command {
         let res = self.status();
         CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
         if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Interrupt received",
+            ));
         }
         res
     }
@@ -57,7 +60,10 @@ impl CommandExt for Command {
         let res = self.output();
         CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
         if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Interrupt received",
+            ));
         }
         res
     }
@@ -73,7 +79,10 @@ impl ChildExt for Child {
         let res = self.wait();
         CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
         if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Interrupt received",
+            ));
         }
         res
     }
@@ -152,8 +161,12 @@ Otherwise, run `dotter undeploy` as root, remove cache.toml and cache/ folders, 
     }
 
     if let Some(clone_url) = &opt.clone {
-        clone::run_clone(if clone_url.is_empty() { None } else { Some(clone_url) })
-            .context("clone repository")?;
+        clone::run_clone(if clone_url.is_empty() {
+            None
+        } else {
+            Some(clone_url)
+        })
+        .context("clone repository")?;
         // run_clone sets the current directory to the cloned repo,
         // so relative config paths (the default) will resolve from there.
     }
