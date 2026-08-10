@@ -329,6 +329,22 @@ fn merge_configuration_files(
                 if let Some(package_included) = included.remove(package_name) {
                     package_global.files.extend(package_included.files);
                     recursive_extend_map(&mut package_global.variables, package_included.variables);
+                    package_global
+                        .hooks
+                        .pre_deploy
+                        .extend(package_included.hooks.pre_deploy);
+                    package_global
+                        .hooks
+                        .post_deploy
+                        .extend(package_included.hooks.post_deploy);
+                    package_global
+                        .hooks
+                        .pre_undeploy
+                        .extend(package_included.hooks.pre_undeploy);
+                    package_global
+                        .hooks
+                        .post_undeploy
+                        .extend(package_included.hooks.post_undeploy);
                 }
             }
 
