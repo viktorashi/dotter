@@ -95,8 +95,9 @@ pub(crate) fn run_package_hook(
                     .spawn()
                     .context("spawn sh")?
             };
+            use crate::ChildExt;
             anyhow::ensure!(
-                child.wait().context("wait for hook command")?.success(),
+                child.wait_interruptible().context("wait for hook command")?.success(),
                 "hook command returned error"
             );
             Ok(())
