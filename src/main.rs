@@ -3,6 +3,7 @@ extern crate log;
 
 mod actions;
 mod args;
+mod clone;
 mod config;
 mod deploy;
 mod difference;
@@ -16,21 +17,22 @@ mod watch;
 
 use std::fmt::Write;
 use std::io;
-use std::process::{Command, Child, ExitStatus, Output};
+use std::process::{Child, Command, ExitStatus, Output};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 use clap::CommandFactory;
 use clap_complete::{generate, generate_to};
 
-pub static CHILD_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static CHILD_RUNNING: AtomicBool = AtomicBool::new(false);
+pub static INTERRUPTED: AtomicBool = AtomicBool::new(false);
 
 fn setup_ctrlc() {
     let _ = ctrlc::set_handler(move || {
-        if !CHILD_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        if !CHILD_RUNNING.load(Ordering::SeqCst) {
             std::process::exit(130);
         } else {
-            INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
+            INTERRUPTED.store(true, Ordering::SeqCst);
         }
     });
 }
@@ -42,21 +44,27 @@ pub trait CommandExt {
 
 impl CommandExt for Command {
     fn status_interruptible(&mut self) -> io::Result<ExitStatus> {
-        CHILD_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+        CHILD_RUNNING.store(true, Ordering::SeqCst);
         let res = self.status();
-        CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-        if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+        CHILD_RUNNING.store(false, Ordering::SeqCst);
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Interrupt received",
+            ));
         }
         res
     }
 
     fn output_interruptible(&mut self) -> io::Result<Output> {
-        CHILD_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+        CHILD_RUNNING.store(true, Ordering::SeqCst);
         let res = self.output();
-        CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-        if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+        CHILD_RUNNING.store(false, Ordering::SeqCst);
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Interrupt received",
+            ));
         }
         res
     }
@@ -68,11 +76,14 @@ pub trait ChildExt {
 
 impl ChildExt for Child {
     fn wait_interruptible(&mut self) -> io::Result<ExitStatus> {
-        CHILD_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+        CHILD_RUNNING.store(true, Ordering::SeqCst);
         let res = self.wait();
-        CHILD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
-        if INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(io::Error::new(io::ErrorKind::Interrupted, "Interrupt received"));
+        CHILD_RUNNING.store(false, Ordering::SeqCst);
+        if INTERRUPTED.load(Ordering::SeqCst) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Interrupt received",
+            ));
         }
         res
     }
@@ -148,6 +159,17 @@ fn run() -> Result<bool> {
 If you're truly logged in as root, it is safe to ignore this message.
 Otherwise, run `dotter undeploy` as root, remove cache.toml and cache/ folders, then use Dotter as a regular user.");
         }
+    }
+
+    if let Some(clone_url) = &opt.clone {
+        clone::run_clone(if clone_url.is_empty() {
+            None
+        } else {
+            Some(clone_url)
+        })
+        .context("clone repository")?;
+        // run_clone sets the current directory to the cloned repo,
+        // so relative config paths (the default) will resolve from there.
     }
 
     let action = opt.action.clone().unwrap_or_default();
