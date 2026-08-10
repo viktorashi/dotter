@@ -377,6 +377,7 @@ mod test {
             packages: maplit::btreemap! { "default".into() => true, "disabled".into() => false },
             recurse: true,
             settings: Settings::default(),
+            hooks: crate::config::Hooks::default(),
         };
         let handlebars = create_new_handlebars(&mut config).unwrap();
 
@@ -406,6 +407,7 @@ mod test {
             packages: BTreeMap::new(),
             recurse: true,
             settings: Settings::default(),
+            hooks: crate::config::Hooks::default(),
         };
         let handlebars = create_new_handlebars(&mut config).unwrap();
 
