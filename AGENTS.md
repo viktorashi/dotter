@@ -3,6 +3,8 @@ Repo-local rules for AI agents working on this fork of
 
 Always commit your stuff, and push it, but never forcefully.
 
+Don't take this (`viktorashi`) branch as the source of truth for almost anything (except maybe the design plan and documentation of my twiested ahh vision of what dotter should do and look like). Instead when it comes to implement / patching a feature, find the branch specific to that feature, patch it there, then upstream it into here. That way when we DO decide to open PR's for the original upstream (SuperCuber), they'll have clean feature branches to review.
+
 ## The vision
 
 > **Dotfiles management where configs don't drift across machines. Written in Rust.**
