@@ -181,7 +181,7 @@ pub fn get_options() -> Options {
         matches,
         repo_settings,
         global_settings,
-        [noconfirm, quiet, diff_context_lines, verbosity]
+        [force, noconfirm, quiet, diff_context_lines, verbosity]
     );
 
     if opt.dry_run {
