@@ -194,7 +194,7 @@ Otherwise, run `dotter undeploy` as root, remove cache.toml and cache/ folders, 
                 return Ok(false);
             }
         }
-        args::Action::InitMachine => {
+        args::Action::InitMachine { .. } => {
             debug!("Interactively initializing machine...");
             init_machine::setup_machine(&opt, true).context("initialize machine")?;
         }

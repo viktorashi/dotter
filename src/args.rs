@@ -132,7 +132,11 @@ pub enum Action {
     Init,
 
     /// Interactively select a machine profile, creating one if necessary.
-    InitMachine,
+    InitMachine {
+        /// It's neccesary if not in TTY
+        #[clap(long)]
+        machine: Option<String>,
+    },
 
     /// Run continuously, watching the repository for changes and deploying as soon as they
     /// happen. Can be ran with `--dry-run`
