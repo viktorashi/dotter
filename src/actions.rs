@@ -132,7 +132,7 @@ pub fn delete_symlink(
 
     let comparison = fs
         .compare_symlink(source, target)
-        .context("detect symlink's current state")?;
+        .with_context(|| format!("detect current state of symlink {target:?}"))?;
     debug!("Current state: {}", comparison);
 
     match comparison {
@@ -187,7 +187,7 @@ pub fn delete_template(
 
     let comparison = fs
         .compare_template(target, cache)
-        .context("detect templated file's current state")?;
+        .with_context(|| format!("detect current state of templated file {target:?}"))?;
     debug!("Current state: {}", comparison);
 
     match comparison {
@@ -266,7 +266,7 @@ pub fn create_symlink(
 
     let comparison = fs
         .compare_symlink(source, &target.target)
-        .context("detect symlink's current state")?;
+        .with_context(|| format!("detect current state of symlink {:?}", target.target))?;
     debug!("Current state: {}", comparison);
 
     match comparison {
@@ -340,7 +340,7 @@ pub fn create_template(
 
     let comparison = fs
         .compare_template(&target.target, cache)
-        .context("detect templated file's current state")?;
+        .with_context(|| format!("detect current state of templated file {:?}", target.target))?;
     debug!("Current state: {}", comparison);
 
     match comparison {
@@ -423,7 +423,7 @@ pub fn update_symlink(
 
     let comparison = fs
         .compare_symlink(source, &target.target)
-        .context("detect symlink's current state")?;
+        .with_context(|| format!("detect current state of symlink {:?}", target.target))?;
     debug!("Current state: {}", comparison);
 
     match comparison {
@@ -494,7 +494,7 @@ pub fn update_template(
 
     let comparison = fs
         .compare_template(&target.target, cache)
-        .context("detect templated file's current state")?;
+        .with_context(|| format!("detect current state of templated file {:?}", target.target))?;
     debug!("Current state: {}", comparison);
 
     match comparison {

@@ -103,18 +103,18 @@ impl RealFilesystem {
 #[cfg(windows)]
 impl Filesystem for RealFilesystem {
     fn compare_symlink(&mut self, source: &Path, link: &Path) -> Result<SymlinkComparison> {
-        let source_state = get_file_state(source).context("get source state")?;
+        let source_state = get_file_state(source).with_context(|| format!("get source state for {source:?}"))?;
         trace!("Source state: {:#?}", source_state);
-        let link_state = get_file_state(link).context("get link state")?;
+        let link_state = get_file_state(link).with_context(|| format!("get link state for {link:?}"))?;
         trace!("Link state: {:#?}", link_state);
 
         compare_symlink(source, source_state, link_state)
     }
 
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison> {
-        let target_state = get_file_state(target).context("get state of target")?;
+        let target_state = get_file_state(target).with_context(|| format!("get state of target {target:?}"))?;
         trace!("Target state: {:#?}", target_state);
-        let cache_state = get_file_state(cache).context("get state of cache")?;
+        let cache_state = get_file_state(cache).with_context(|| format!("get state of cache {cache:?}"))?;
         trace!("Cache state: {:#?}", cache_state);
 
         Ok(compare_template(target_state, cache_state))
@@ -271,15 +271,15 @@ impl RealFilesystem {
 #[cfg(unix)]
 impl Filesystem for RealFilesystem {
     fn compare_symlink(&mut self, source: &Path, link: &Path) -> Result<SymlinkComparison> {
-        let source_state = get_file_state(source).context("get source state")?;
-        let link_state = get_file_state(link).context("get link state")?;
+        let source_state = get_file_state(source).with_context(|| format!("get source state for {source:?}"))?;
+        let link_state = get_file_state(link).with_context(|| format!("get link state for {link:?}"))?;
 
         compare_symlink(source, source_state, link_state)
     }
 
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison> {
-        let target_state = get_file_state(target).context("get state of target")?;
-        let cache_state = get_file_state(cache).context("get state of cache")?;
+        let target_state = get_file_state(target).with_context(|| format!("get state of target {target:?}"))?;
+        let cache_state = get_file_state(cache).with_context(|| format!("get state of cache {cache:?}"))?;
 
         Ok(compare_template(target_state, cache_state))
     }
@@ -706,7 +706,7 @@ fn get_file_state(path: &Path) -> Result<FileState> {
         Ok(f) => Ok(FileState::File(Some(f))),
         Err(e) if e.kind() == ErrorKind::InvalidData => Ok(FileState::File(None)),
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(FileState::Missing),
-        Err(e) => Err(e).context("read contents of file that isn't symbolic or directory")?,
+        Err(e) => Err(e).with_context(|| format!("read contents of file at {path:?}")),
     }
 }
 
